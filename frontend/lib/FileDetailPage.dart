@@ -1,10 +1,12 @@
+// ignore_for_file: file_names
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
-import 'LessonPage.dart';
+import 'AddLessonPage.dart';
 
 class FileDetailPage extends StatefulWidget {
   final String fileName;
@@ -37,14 +39,14 @@ class _FileDetailPageState extends State<FileDetailPage> {
       final file = File(filePath);
       await file.writeAsBytes(response.bodyBytes);
 
-      print("✅ PDF saved at: $filePath"); // Debugging output
+      print("PDF saved at: $filePath"); // Debugging output
       print("File exists: ${file.existsSync()}"); // Check if file exists
 
       setState(() {
         pdfPath = filePath;
       });
     } else {
-      print("❌ Failed to fetch PDF");
+      print("Failed to fetch PDF");
     }
   }
 
@@ -59,7 +61,7 @@ class _FileDetailPageState extends State<FileDetailPage> {
         extractedText = data['extracted_text'] ?? "No extracted text available";
       });
     } else {
-      print("❌ Failed to fetch extracted text");
+      print(" Failed to fetch extracted text");
     }
   }
 
@@ -85,9 +87,9 @@ class _FileDetailPageState extends State<FileDetailPage> {
               builder: (context) => LessonPage(testText: extractedText), // Pass extracted text
             ),
           );
-        },
-        child: Icon(Icons.add), // "+" icon
+        }, // "+" icon
         backgroundColor: Colors.deepOrange,
+        child: Icon(Icons.add),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat, // Bottom right
     );

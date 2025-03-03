@@ -1,3 +1,5 @@
+// ignore_for_file: file_names
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -5,8 +7,8 @@ import 'package:provider/provider.dart';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 
-import 'Lessons.dart';
-import 'Materials.dart';
+import 'LessonsPage.dart';
+import 'MaterialsPage.dart';
 
 void main() {
   runApp(MyApp());
@@ -78,13 +80,10 @@ class _MyHomePageState extends State<MyHomePage> {
     switch (selectedIndex) {
       case 0:
         page = UploadPage();
-        break;
       case 1:
-        page = FavouritesPage();
-        break;
+        page = MaterialsPage();
       case 2:
-        page = Lessons();
-        break;
+        page = LessonsPage();
       default:
         throw UnimplementedError('No widget for $selectedIndex');
     }
