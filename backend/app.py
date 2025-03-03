@@ -1,52 +1,74 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import os
-import pytesseract
-from pdf2image import convert_from_path
+import json
+from pdfminer.high_level import extract_text
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)  # Ensure the uploads folder exists
+FILE_RECORD = "files.json"  # Stores filenames persistently
+TEXT_RECORD = "text.json"  # Stores extracted text persistently
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
-uploaded_files = []  # Stores file names
-extracted_texts = {}  # Stores extracted text for each file
+
+# Load stored filenames
+def load_uploaded_files():
+    if os.path.exists(FILE_RECORD):
+        with open(FILE_RECORD, "r") as f:
+            return json.load(f)
+    return []
+
+# Load extracted text
+def load_extracted_texts():
+    if os.path.exists(TEXT_RECORD):
+        with open(TEXT_RECORD, "r") as f:
+            return json.load(f)
+    return {}
+
+# Save filenames persistently
+def save_uploaded_files(files):
+    with open(FILE_RECORD, "w") as f:
+        json.dump(files, f)
+
+# Save extracted text persistently
+def save_extracted_texts(texts):
+    with open(TEXT_RECORD, "w") as f:
+        json.dump(texts, f)
+
+# Load previous state
+uploaded_files = load_uploaded_files()
+extracted_texts = load_extracted_texts()
 
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
-        print("No file in request")
         return jsonify({'error': 'No file uploaded'}), 400
     
     file = request.files['file']
     
     if file.filename == '':
-        print("File has no name")
         return jsonify({'error': 'No selected file'}), 400
 
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
-    print(f"Saving file to: {file_path}")
 
     try:
         file.save(file_path)  # Save file
     except Exception as e:
-        print(f"File save error: {str(e)}")
         return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
 
-    uploaded_files.append(file.filename)  # Store filename in list
+    if file.filename not in uploaded_files:
+        uploaded_files.append(file.filename)
+        save_uploaded_files(uploaded_files)  # Save persistently
 
-    # Convert PDF to Images
+    # Extract text using pdfminer.six
     try:
-        images = convert_from_path(file_path)
-        text = ""
-        for img in images:
-            text += pytesseract.image_to_string(img) + "\n"
-
-        extracted_texts[file.filename] = text.strip()
-        print("Text extracted successfully!")
+        extracted_text = extract_text(file_path).strip()
+        extracted_texts[file.filename] = extracted_text
+        save_extracted_texts(extracted_texts)  # Save persistently
     except Exception as e:
-        print(f"OCR error: {str(e)}")
         return jsonify({'error': f'Error extracting text: {str(e)}'}), 500
 
     return jsonify({'message': 'File uploaded successfully', 'files': uploaded_files}), 200
@@ -58,25 +80,34 @@ def get_files():
     return jsonify({'files': uploaded_files})
 
 
-@app.route('/get_text', methods=['GET'])
-def get_text():
-    """Returns extracted text for a specific file."""
+@app.route('/get_file', methods=['GET'])
+def get_file():
+    """Returns the uploaded PDF file for a specific filename."""
+    file_name = request.args.get('file')
+
+    if not file_name:
+        return jsonify({'error': 'File name is required'}), 400
+
+    file_path = os.path.join(app.config["UPLOAD_FOLDER"], file_name)
+
+    if not os.path.exists(file_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    return send_file(file_path, as_attachment=True)
+
+
+@app.route('/get_file_content', methods=['GET'])
+def get_file_content():
+    """Returns extracted text from the uploaded PDF."""
     file_name = request.args.get('file')
 
     if not file_name:
         return jsonify({'error': 'File name is required'}), 400
 
     if file_name not in extracted_texts:
-        return jsonify({'error': 'File not found or text not extracted'}), 404
+        return jsonify({'error': 'Text not found'}), 404
 
-    return jsonify({'extracted_text': extracted_texts[file_name]})
-
-@app.route('/get_file_content', methods=['GET'])
-def get_file_content():
-    file_name = request.args.get('file')
-    if file_name in extracted_texts:
-        return jsonify({'text': extracted_texts[file_name]})
-    return jsonify({'error': 'File not found'}), 404
+    return jsonify({'text': extracted_texts[file_name]})
 
 
 if __name__ == '__main__':

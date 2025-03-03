@@ -133,14 +133,24 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-class UploadPage extends StatelessWidget {
-  Future<void> uploadPDF(BuildContext context) async {
+
+class UploadPage extends StatefulWidget {
+  @override
+  _UploadPageState createState() => _UploadPageState();
+}
+
+class _UploadPageState extends State<UploadPage> {
+  bool _isUploading = false;
+
+  Future<void> uploadPDF() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['pdf'],
     );
 
     if (result != null) {
+      setState(() => _isUploading = true); // Show loading state
+
       File file = File(result.files.single.path!);
       var request = http.MultipartRequest(
         'POST',
@@ -150,35 +160,35 @@ class UploadPage extends StatelessWidget {
       request.files.add(await http.MultipartFile.fromPath('file', file.path));
       var response = await request.send();
 
-      if (response.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('File uploaded successfully!')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to upload file')),
-        );
-      }
+      if (!mounted) return; // Prevents using context if widget is disposed
+
+      setState(() => _isUploading = false); // Hide loading state
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(response.statusCode == 200
+              ? 'File uploaded successfully!'
+              : 'Failed to upload file'),
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          ElevatedButton(
-            onPressed: () => uploadPDF(context),
-            child: Text("Upload PDF"),
-          ),
-        ],
+    return Scaffold(
+      appBar: AppBar(title: Text('Upload PDF')),
+      body: Center(
+        child: _isUploading
+            ? CircularProgressIndicator() // Show loading spinner while uploading
+            : ElevatedButton(
+                onPressed: uploadPDF,
+                child: Text("Upload PDF"),
+              ),
       ),
     );
   }
 }
-
 
 Future<List<String>> fetchFiles() async {
   final url = Uri.parse('http://10.0.2.2:5000/get_files'); 
