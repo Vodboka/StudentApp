@@ -9,7 +9,7 @@ import 'package:file_picker/file_picker.dart';
 
 import 'LessonsPage.dart';
 import 'MaterialsPage.dart';
-
+import 'StartLesson.dart';
 void main() {
   runApp(MyApp());
 }
@@ -84,6 +84,8 @@ class _MyHomePageState extends State<MyHomePage> {
         page = MaterialsPage();
       case 2:
         page = LessonsPage();
+      case 3:
+        page = StartLesson();
       default:
         throw UnimplementedError('No widget for $selectedIndex');
     }
@@ -108,7 +110,11 @@ class _MyHomePageState extends State<MyHomePage> {
                     NavigationRailDestination(
                       icon: Icon(Icons.new_label), 
                       label: Text ('Lessons')
-                      )
+                      ),
+                    NavigationRailDestination(
+                      icon: Icon(Icons.play_arrow), // New icon for StartLesson
+                      label: Text('Start Lesson'), // New label for StartLesson
+                    )  
                   ],
                   selectedIndex: selectedIndex,
                   onDestinationSelected: (value) {

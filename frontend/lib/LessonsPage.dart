@@ -1,3 +1,5 @@
+// ignore_for_file: file_names
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -53,20 +55,20 @@ class _LessonsPageState extends State<LessonsPage> {
           children: [
             if (lessons.isEmpty)
               Padding(
-                padding: EdgeInsets.only(top: screenHeight * 0.0, bottom: 10.0),
+                padding: EdgeInsets.only(top: screenHeight * 0.01, bottom: 10.0),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.start,
                   children: [
                     Icon(
                       Icons.arrow_back,
-                      size: 24,
+                      size: 20,
                       color: Colors.deepOrange,
                     ),
-                    SizedBox(width: 8),
+                    SizedBox(width: 5),
                     Flexible(
                       child: Text(
-                        "Go to 'Lessons' menu to add new lessons!",
-                        style: TextStyle(fontSize: 16, fontStyle: FontStyle.italic),
+                        "Check whether there are any materials to work on!",
+                        style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
                       ),
                     ),
                   ],
@@ -120,7 +122,7 @@ class _LessonsPageState extends State<LessonsPage> {
                           context,
                           MaterialPageRoute(
                             builder: (context) => FileDetailPage(
-                                fileName: lesson['title'].toString() + '.pdf'),
+                                fileName: '${lesson['title']}.pdf'),
                           ),
                         );
                       },
