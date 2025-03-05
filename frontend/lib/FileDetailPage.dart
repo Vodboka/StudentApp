@@ -1,5 +1,5 @@
 // ignore_for_file: file_names
-
+//TODO make the floatingbutton unavailable if the lesson is already created
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -26,7 +26,7 @@ class _FileDetailPageState extends State<FileDetailPage> {
     super.initState();
     fetchFile();
     fetchExtractedText();
-  }
+  } 
 
   Future<void> fetchFile() async {
     final response = await http.get(

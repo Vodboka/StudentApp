@@ -1,17 +1,18 @@
 from flask import Flask, request, jsonify, send_file
 import os
 import json
+import hashlib
 from pdfminer.high_level import extract_text
 
 app = Flask(__name__)
 
 UPLOAD_FOLDER = "uploads"
-FILE_RECORD = "files.json"  # Stores filenames persistently
-TEXT_RECORD = "text.json"  # Stores extracted text persistently
+TEXTS_FOLDER = "texts"  # Directory to store JSON files
+FILE_RECORD = "files.json"  # Stores uploaded filenames persistently
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(TEXTS_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
-
 
 # Load stored filenames
 def load_uploaded_files():
@@ -20,28 +21,38 @@ def load_uploaded_files():
             return json.load(f)
     return []
 
-# Load extracted text
-def load_extracted_texts():
-    if os.path.exists(TEXT_RECORD):
-        with open(TEXT_RECORD, "r") as f:
-            return json.load(f)
-    return {}
-
 # Save filenames persistently
 def save_uploaded_files(files):
     with open(FILE_RECORD, "w") as f:
         json.dump(files, f)
 
-# Save extracted text persistently
-def save_extracted_texts(texts):
-    with open(TEXT_RECORD, "w") as f:
-        json.dump(texts, f)
+# Generate a unique hashcode based on file content
+def generate_hash(file_path):
+    hasher = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        hasher.update(f.read())
+    return hasher.hexdigest()
 
-# Load previous state
-uploaded_files = load_uploaded_files()
-extracted_texts = load_extracted_texts()
+# Save extracted text into a JSON file with hashcode as the filename
+def save_extracted_text(hashcode, filename, text):
+    json_path = os.path.join(TEXTS_FOLDER, f"{filename}.json")
+    lesson_data = {
+        "filename": filename,
+        "text": text,
+        "hashcode": hashcode
+    }
+    with open(json_path, "w") as f:
+        json.dump(lesson_data, f, indent=4)
 
+# Load extracted text from a specific JSON file
+def load_extracted_text(hashcode):
+    json_path = os.path.join(TEXTS_FOLDER, f"{hashcode}.json")
+    if os.path.exists(json_path):
+        with open(json_path, "r") as f:
+            return json.load(f)
+    return None
 
+# Upload endpoint
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -59,56 +70,63 @@ def upload_file():
     except Exception as e:
         return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
 
-    if file.filename not in uploaded_files:
+    hashcode = generate_hash(file_path)
+
+    if file.filename not in load_uploaded_files():
+        uploaded_files = load_uploaded_files()
         uploaded_files.append(file.filename)
         save_uploaded_files(uploaded_files)  # Save persistently
 
     # Extract text using pdfminer.six
     try:
         extracted_text = extract_text(file_path).strip()
-        extracted_texts[file.filename] = extracted_text
-        save_extracted_texts(extracted_texts)  # Save persistently
+        save_extracted_text(hashcode, file.filename, extracted_text)  # Save persistently
     except Exception as e:
         return jsonify({'error': f'Error extracting text: {str(e)}'}), 500
 
-    return jsonify({'message': 'File uploaded successfully', 'files': uploaded_files}), 200
+    return jsonify({
+        'message': 'File uploaded successfully',
+        'filename': file.filename,
+        'hashcode': hashcode
+    }), 200
 
-
+# Get list of uploaded files
 @app.route('/get_files', methods=['GET'])
 def get_files():
-    """Returns a list of uploaded file names."""
-    return jsonify({'files': uploaded_files})
+    return jsonify({'files': load_uploaded_files()})
 
-
+# Get a specific file
 @app.route('/get_file', methods=['GET'])
 def get_file():
-    """Returns the uploaded PDF file for a specific filename."""
     file_name = request.args.get('file')
-
     if not file_name:
         return jsonify({'error': 'File name is required'}), 400
 
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], file_name)
-
     if not os.path.exists(file_path):
         return jsonify({'error': 'File not found'}), 404
 
     return send_file(file_path, as_attachment=True)
 
-
+# Get extracted text by file name
 @app.route('/get_file_content', methods=['GET'])
 def get_file_content():
-    """Returns extracted text from the uploaded PDF."""
     file_name = request.args.get('file')
-
     if not file_name:
         return jsonify({'error': 'File name is required'}), 400
 
-    if file_name not in extracted_texts:
+    lesson_data = load_extracted_text(file_name)
+    if not lesson_data:
         return jsonify({'error': 'Text not found'}), 404
 
-    return jsonify({'text': extracted_texts[file_name]})
+    return jsonify(lesson_data)
 
+# Get all stored lessons
+@app.route('/get_lessons', methods=['GET'])
+def get_lessons():
+    """Returns a list of all stored lesson JSON files."""
+    lesson_files = [f for f in os.listdir(TEXTS_FOLDER) if f.endswith(".json")]
+    return jsonify({'lessons': lesson_files})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
