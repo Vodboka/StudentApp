@@ -1,4 +1,8 @@
 // ignore_for_file: file_names
+//The page for adding a new lesson to the server based on the material
+//TODO implement logic for adding multiple documents for a lesson (maybe create Course 1 - M Lessons)
+//TODO Link with backend to create 
+//TODO validation (wether the lesson name already exist)
 
 import 'package:flutter/material.dart';
 

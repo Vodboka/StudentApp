@@ -2,7 +2,9 @@ from flask import Flask, request, jsonify, send_file
 import os
 import json
 import hashlib
-from pdfminer.high_level import extract_text
+import fitz  # PyMuPDF for PDF text extraction
+import re
+from collections import Counter  # To find most common font size
 
 app = Flask(__name__)
 
@@ -12,6 +14,7 @@ FILE_RECORD = "files.json"  # Stores uploaded filenames persistently
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TEXTS_FOLDER, exist_ok=True)
+
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
 # Load stored filenames
@@ -33,24 +36,80 @@ def generate_hash(file_path):
         hasher.update(f.read())
     return hasher.hexdigest()
 
-# Save extracted text into a JSON file with hashcode as the filename
-def save_extracted_text(hashcode, filename, text):
-    json_path = os.path.join(TEXTS_FOLDER, f"{filename}.json")
+# Save extracted text into a JSON file
+def save_extracted_text(hashcode, filename, main_text, footnotes):
+    """Saves extracted text and footnotes in a structured JSON format."""
+    json_path = os.path.join(TEXTS_FOLDER, f"{os.path.splitext(filename)[0]}.json")
+    
     lesson_data = {
-        "filename": filename,
-        "text": text,
-        "hashcode": hashcode
+        "file_info": {
+            "filename": filename,
+            "hashcode": hashcode
+        },
+        "content": {
+            "main_text": main_text,
+            "footnotes": footnotes
+        }
     }
+    
     with open(json_path, "w") as f:
-        json.dump(lesson_data, f, indent=4)
+        json.dump(lesson_data, f, indent=4, ensure_ascii=False)
 
-# Load extracted text from a specific JSON file
-def load_extracted_text(hashcode):
-    json_path = os.path.join(TEXTS_FOLDER, f"{hashcode}.json")
-    if os.path.exists(json_path):
-        with open(json_path, "r") as f:
-            return json.load(f)
-    return None
+# Determine the dominant font size in the document
+def get_dominant_font_size(pdf_path):
+    """Finds the most common font size in the document to use as a baseline."""
+    font_sizes = []
+
+    with fitz.open(pdf_path) as doc:
+        for page in doc:
+            blocks = page.get_text("dict")["blocks"]
+            for block in blocks:
+                if "lines" in block:
+                    for line in block["lines"]:
+                        for span in line["spans"]:
+                            font_sizes.append(span["size"])
+
+    if font_sizes:
+        most_common_size = Counter(font_sizes).most_common(1)[0][0]
+        return most_common_size
+    return 10  # Fallback value if no text is found
+
+# Extract main text and footnotes using a dynamic font size threshold
+def extract_text_by_dynamic_font_size(pdf_path):
+    """Extracts text from a PDF, separating main text and footnotes using dynamic font size."""
+    main_text, footnotes = [], []
+
+    dominant_font_size = get_dominant_font_size(pdf_path)
+    footnote_threshold = dominant_font_size * 0.9  # Footnotes usually smaller than this
+
+    with fitz.open(pdf_path) as doc:
+        for page in doc:
+            blocks = page.get_text("dict")["blocks"]
+            for block in blocks:
+                if "lines" in block:
+                    for line in block["lines"]:
+                        for span in line["spans"]:
+                            text = span["text"].strip()
+                            font_size = span["size"]
+
+                            # Identify footnotes: usually smaller font
+                            if font_size < footnote_threshold:
+                                footnotes.append(text)
+                            else:
+                                main_text.append(text)
+
+    # Clean text properly
+    main_text_cleaned = clean_text(" ".join(main_text))
+    footnotes_cleaned = clean_text(" ".join(footnotes))
+
+    return main_text_cleaned, footnotes_cleaned
+
+def clean_text(text):
+    """Cleans text by removing extra spaces and unwanted characters."""
+    text = re.sub(r'\s+', ' ', text)  # Remove extra spaces
+    text = re.sub(r'(\.{2,}|,{2,}|-{2,}|\s{2,})', ' ', text)  # Remove repeated symbols
+    text = re.sub(r'\[\d+\]|\(\d+\)', '', text)  # Remove footnote reference numbers
+    return text.strip()
 
 # Upload endpoint
 @app.route('/upload', methods=['POST'])
@@ -77,17 +136,18 @@ def upload_file():
         uploaded_files.append(file.filename)
         save_uploaded_files(uploaded_files)  # Save persistently
 
-    # Extract text using pdfminer.six
+    # Extract and clean text, separating main text and footnotes
     try:
-        extracted_text = extract_text(file_path).strip()
-        save_extracted_text(hashcode, file.filename, extracted_text)  # Save persistently
+        main_text, footnotes = extract_text_by_dynamic_font_size(file_path)
+        save_extracted_text(hashcode, file.filename, main_text, footnotes)  # Save persistently
     except Exception as e:
         return jsonify({'error': f'Error extracting text: {str(e)}'}), 500
 
     return jsonify({
         'message': 'File uploaded successfully',
         'filename': file.filename,
-        'hashcode': hashcode
+        'hashcode': hashcode,
+        'footnotes': footnotes  # Properly extracted footnotes
     }), 200
 
 # Get list of uploaded files
@@ -115,18 +175,15 @@ def get_file_content():
     if not file_name:
         return jsonify({'error': 'File name is required'}), 400
 
-    lesson_data = load_extracted_text(file_name)
-    if not lesson_data:
+    json_path = os.path.join(TEXTS_FOLDER, f"{os.path.splitext(file_name)[0]}.json")
+    if not os.path.exists(json_path):
         return jsonify({'error': 'Text not found'}), 404
+
+    with open(json_path, "r") as f:
+        lesson_data = json.load(f)
 
     return jsonify(lesson_data)
 
-# Get all stored lessons
-@app.route('/get_lessons', methods=['GET'])
-def get_lessons():
-    """Returns a list of all stored lesson JSON files."""
-    lesson_files = [f for f in os.listdir(TEXTS_FOLDER) if f.endswith(".json")]
-    return jsonify({'lessons': lesson_files})
-
+# Run Flask App
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
