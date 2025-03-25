@@ -182,7 +182,14 @@ def get_file_content():
     with open(json_path, "r") as f:
         lesson_data = json.load(f)
 
-    return jsonify(lesson_data)
+    # Extract only the main_text from the content part
+    main_text = lesson_data.get("content", {}).get("main_text", "")
+
+    if not main_text:
+        return jsonify({'error': 'Main text not found'}), 404
+
+    return jsonify({'main_text': main_text})
+
 
 # Run Flask App
 if __name__ == '__main__':
