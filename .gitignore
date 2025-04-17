@@ -1,4 +1,2 @@
-backend/uploads
-backend/*.json
-backend/texts
 backend/TODOS.txt
+backend/res

@@ -1,9 +1,6 @@
 // ignore_for_file: file_names
 
 import 'package:flutter/material.dart';
-//TODO work on the counter so it modifies only after the user pressed the next button with a correct answer
-//TODO implement a validate button, and transform into a next button after the colour green was displayed
-//TODO repeat the questions that were not validated in the end
 
 class StartLesson extends StatefulWidget {
   @override
@@ -14,8 +11,8 @@ class _StartLesson extends State<StartLesson> {
   int currentQuestionIndex = 0;
   int correctAnswers = 0;
   int? selectedAnswerIndex;
+  bool isAnswerChecked = false;
 
-  // List of questions, each question has text, multiple choices, and the correct answer index
   List<Map<String, dynamic>> questions = [
     {
       'question': 'What is 2 + 2?',
@@ -34,44 +31,50 @@ class _StartLesson extends State<StartLesson> {
     },
   ];
 
-  void checkAnswer(int selectedIndex) {
+  void validateAnswer() {
+    if (selectedAnswerIndex == null || isAnswerChecked) return;
+
     setState(() {
-      selectedAnswerIndex = selectedIndex;
-      if (selectedIndex == questions[currentQuestionIndex]['correctAnswerIndex']) {
+      isAnswerChecked = true;
+
+      if (selectedAnswerIndex == questions[currentQuestionIndex]['correctAnswerIndex']) {
         correctAnswers++;
       }
     });
   }
 
   void nextQuestion() {
+    if (!isAnswerChecked) return;
+
     setState(() {
       if (currentQuestionIndex < questions.length - 1) {
         currentQuestionIndex++;
-        selectedAnswerIndex = null; // Reset the selected answer
+        selectedAnswerIndex = null;
+        isAnswerChecked = false;
       } else {
-        // If no more questions, reset or finish the quiz
+        // Quiz done: Optionally handle completion
+        // For now, we'll restart
         currentQuestionIndex = 0;
         selectedAnswerIndex = null;
+        isAnswerChecked = false;
+        correctAnswers = 0;
       }
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Calculate the progress
     double progress = (currentQuestionIndex + 1) / questions.length;
 
     return Scaffold(
       appBar: AppBar(
         title: Text("Lesson"),
       ),
-      body: SingleChildScrollView( // Wrap the content in a scrollable view
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch, // Ensures that the button stretches
-          mainAxisAlignment: MainAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // Progress Bar
             LinearProgressIndicator(
               value: progress,
               minHeight: 8,
@@ -79,32 +82,36 @@ class _StartLesson extends State<StartLesson> {
               color: const Color.fromARGB(255, 254, 136, 51),
             ),
             SizedBox(height: 20),
-            // Question Text
             Text(
               questions[currentQuestionIndex]['question'],
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 20),
-            // Choices as buttons
             ...List.generate(questions[currentQuestionIndex]['choices'].length, (index) {
               bool isSelected = selectedAnswerIndex == index;
-              bool isCorrect = isSelected && index == questions[currentQuestionIndex]['correctAnswerIndex'];
-              bool isIncorrect = isSelected && index != questions[currentQuestionIndex]['correctAnswerIndex'];
+              bool isCorrect = isAnswerChecked && index == questions[currentQuestionIndex]['correctAnswerIndex'];
+              bool isIncorrect = isAnswerChecked && isSelected && !isCorrect;
 
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8.0),
                 child: ElevatedButton(
-                  onPressed: () {
-                    checkAnswer(index);
-                  },
+                  onPressed: isAnswerChecked
+                      ? null
+                      : () {
+                          setState(() {
+                            selectedAnswerIndex = index;
+                          });
+                        },
                   style: ButtonStyle(
                     backgroundColor: WidgetStateProperty.all(
                       isCorrect
-                          ? Colors.green // Correct answer highlighted in green
+                          ? Colors.green
                           : isIncorrect
-                              ? Colors.red // Incorrect answer highlighted in red
-                              : const Color.fromARGB(255, 255, 195, 106), // Default answer button
+                              ? Colors.red
+                              : (isSelected
+                                  ? const Color.fromARGB(255, 255, 195, 106)
+                                  : Colors.grey[300]),
                     ),
                     shape: WidgetStateProperty.all(RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -118,27 +125,27 @@ class _StartLesson extends State<StartLesson> {
               );
             }),
             SizedBox(height: 20),
-            // Spacer widget ensures the Next button stays at the bottom
-            SizedBox(height: 20),
+
+            // Validate / Next button
             Padding(
               padding: EdgeInsets.only(bottom: 16),
               child: ElevatedButton(
-                onPressed: nextQuestion,
+                onPressed: isAnswerChecked ? nextQuestion : validateAnswer,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.deepOrange, // A distinct color for the Next button
+                  backgroundColor: isAnswerChecked ? Colors.deepOrange : Colors.blue,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
                   padding: EdgeInsets.symmetric(vertical: 15),
-                  minimumSize: Size(double.infinity, 0), // Make the button stretch across
+                  minimumSize: Size(double.infinity, 0),
                 ),
                 child: Text(
-                  'Next',
+                  isAnswerChecked ? 'Next' : 'Check',
                   style: TextStyle(fontSize: 18),
                 ),
               ),
             ),
-            // Correct answers display (optional, can be removed or customized)
+
             Text(
               'Correct Answers: $correctAnswers',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),

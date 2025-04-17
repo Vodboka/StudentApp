@@ -1,13 +1,9 @@
-// ignore_for_file: file_names
-//The page for adding a new lesson to the server based on the material
-//TODO implement logic for adding multiple documents for a lesson (maybe create Course 1 - M Lessons)
-//TODO Link with backend to create 
-//TODO validation (wether the lesson name already exist)
-
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class LessonPage extends StatefulWidget {
-  final String testText; // Required but not displayed
+  final String testText;
 
   LessonPage({required this.testText});
 
@@ -17,12 +13,90 @@ class LessonPage extends StatefulWidget {
 
 class _LessonPageState extends State<LessonPage> {
   final TextEditingController _lessonNameController = TextEditingController();
+  final TextEditingController _subjectController = TextEditingController();
+
   DateTime? _selectedDate;
   String? _selectedDifficulty;
+  String? _selectedSubject;
+
+  List<String> existingSubjects = [];
+  late Future<List<String>> _subjectsFuture;
 
   final List<String> difficulties = ["Easy", "Medium", "Hard"];
 
-  // Function to show date picker
+  @override
+  void initState() {
+    super.initState();
+    _subjectsFuture = fetchSubjects();
+  }
+
+  Future<List<String>> fetchSubjects() async {
+    final response = await http.get(Uri.parse('http://10.0.2.2:5000/get_subjects'));
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return List<String>.from(data['subjects']);
+    } else {
+      throw Exception('Failed to load subjects');
+    }
+  }
+
+Future<void> submitLesson() async {
+  final String lessonName = _lessonNameController.text.trim();
+  final String? difficulty = _selectedDifficulty;
+  final DateTime? testDate = _selectedDate;
+  final String subject = _subjectController.text.trim();
+
+  if (lessonName.isEmpty || difficulty == null || testDate == null || subject.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Please fill in all fields")),
+    );
+    return;
+  }
+
+  final Map<String, dynamic> lessonData = {
+    'lesson_name': lessonName,
+    'subject': subject,
+    'date': testDate.toIso8601String(),
+    'difficulty': difficulty,
+  };
+
+  try {
+    final url = 'http://10.0.2.2:5000/add_lesson';
+
+    final response = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode(lessonData),
+    );
+
+    print('Response status: ${response.statusCode}');
+    print('Response body: ${response.body}'); // Debugging line
+
+    if (response.statusCode == 200) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Lesson saved successfully!")),
+      );
+
+      // Navigate to the LessonsPage after submitting
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => LessonsPage()),
+      );
+    } else {
+      final errorMsg = json.decode(response.body)['error'] ?? "Unknown error";
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $errorMsg")),
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Network error: ${e.toString()}")),
+    );
+  }
+}
+
+
   Future<void> _pickDate(BuildContext context) async {
     DateTime? pickedDate = await showDatePicker(
       context: context,
@@ -31,7 +105,7 @@ class _LessonPageState extends State<LessonPage> {
       lastDate: DateTime(2100),
     );
 
-    if (pickedDate != null && pickedDate != _selectedDate) {
+    if (pickedDate != null) {
       setState(() {
         _selectedDate = pickedDate;
       });
@@ -44,66 +118,132 @@ class _LessonPageState extends State<LessonPage> {
       appBar: AppBar(title: Text("Add Lesson Details")),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _lessonNameController,
-              decoration: InputDecoration(
-                labelText: "Lesson Name",
-                border: OutlineInputBorder(),
-              ),
-            ),
-            SizedBox(height: 16),
-            GestureDetector(
-              onTap: () => _pickDate(context),
-              child: AbsorbPointer(
-                child: TextField(
-                  decoration: InputDecoration(
-                    labelText: _selectedDate == null
-                        ? "Select Test Date"
-                        : "Test Date: ${_selectedDate!.toLocal()}".split(' ')[0],
-                    border: OutlineInputBorder(),
-                    suffixIcon: Icon(Icons.calendar_today),
+        child: FutureBuilder<List<String>>(
+          future: _subjectsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(child: CircularProgressIndicator());
+            }
+
+            if (snapshot.hasError) {
+              return Center(child: Text('Failed to load subjects'));
+            }
+
+            if (snapshot.hasData) {
+              existingSubjects = snapshot.data!;
+            }
+
+            return SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: _subjectController,
+                    decoration: InputDecoration(
+                      labelText: "Enter Subject Name",
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (text) {
+                      setState(() {
+                        _selectedSubject = text;
+                      });
+                    },
                   ),
-                ),
+                  SizedBox(height: 16),
+
+                  // Display existing subjects if input is empty
+                  if (_subjectController.text.isEmpty)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: existingSubjects
+                          .map((subject) => ListTile(
+                                title: Text(subject),
+                                onTap: () {
+                                  setState(() {
+                                    _subjectController.text = subject;
+                                  });
+                                },
+                              ))
+                          .toList(),
+                    ),
+                  SizedBox(height: 16),
+
+                  TextField(
+                    controller: _lessonNameController,
+                    decoration: InputDecoration(
+                      labelText: "Lesson Name",
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+
+                  GestureDetector(
+                    onTap: () => _pickDate(context),
+                    child: AbsorbPointer(
+                      child: TextField(
+                        decoration: InputDecoration(
+                          labelText: _selectedDate == null
+                              ? "Select Test Date"
+                              : "Test Date: ${_selectedDate!.toLocal().toIso8601String().split('T')[0]}",
+                          border: OutlineInputBorder(),
+                          suffixIcon: Icon(Icons.calendar_today),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+
+                  DropdownButtonFormField<String>(
+                    value: _selectedDifficulty,
+                    decoration: InputDecoration(
+                      labelText: "Difficulty Level",
+                      border: OutlineInputBorder(),
+                    ),
+                    items: difficulties.map((String difficulty) {
+                      return DropdownMenuItem<String>(
+                        value: difficulty,
+                        child: Text(difficulty),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedDifficulty = value;
+                      });
+                    },
+                  ),
+                  SizedBox(height: 24),
+
+                  Center(
+                    child: ElevatedButton(
+                      onPressed: submitLesson,
+                      child: Text("Submit"),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    widget.testText,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: _selectedDifficulty,
-              decoration: InputDecoration(
-                labelText: "Difficulty Level",
-                border: OutlineInputBorder(),
-              ),
-              items: difficulties.map((String difficulty) {
-                return DropdownMenuItem<String>(
-                  value: difficulty,
-                  child: Text(difficulty),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedDifficulty = value;
-                });
-              },
-            ),
-            SizedBox(height: 24),
-            Center(
-              child: ElevatedButton(
-                onPressed: () {
-                  // Handle form submission, testText is still accessible
-                  print("Test Text (Hidden): ${widget.testText}");
-                  print("Lesson: ${_lessonNameController.text}");
-                  print("Date: $_selectedDate");
-                  print("Difficulty: $_selectedDifficulty");
-                },
-                child: Text("Submit"),
-              ),
-            ),
-          ],
+            );
+          },
         ),
       ),
+    );
+  }
+}
+
+class LessonsPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text("Lessons")),
+      body: Center(child: Text("List of lessons will be displayed here.")),
     );
   }
 }

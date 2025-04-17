@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:flutter_pdfview/flutter_pdfview.dart';
 import 'AddLessonPage.dart';
 
+
 class FileDetailPage extends StatefulWidget {
   final String fileName;
 
@@ -58,12 +59,15 @@ class _FileDetailPageState extends State<FileDetailPage> {
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       setState(() {
-        extractedText = data['extracted_text'] ?? "No extracted text available";
+        ////////////IN CASE YOU CHANGE TEH ARHITECTURE OF THE JSON FILE CHANGE HERE///////////////////
+        extractedText = data['main_text'] ?? "No extracted text available"; 
       });
     } else {
       print(" Failed to fetch extracted text");
     }
   }
+
+  
 
   @override
   Widget build(BuildContext context) {

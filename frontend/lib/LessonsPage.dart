@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'FileDetailPage.dart';
+import 'StartLesson.dart';
 
 class LessonsPage extends StatefulWidget {
   @override
@@ -11,9 +11,9 @@ class LessonsPage extends StatefulWidget {
 }
 
 class _LessonsPageState extends State<LessonsPage> {
-  List<Map<String, String>> lessons = [];
-  bool isLoading = true; // To show a loading indicator
-  bool hasError = false; // To check if there's an error
+  List<Map<String, dynamic>> lessons = [];
+  bool isLoading = true;
+  bool hasError = false;
 
   @override
   void initState() {
@@ -28,7 +28,7 @@ class _LessonsPageState extends State<LessonsPage> {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          lessons = List<Map<String, String>>.from(data['lessons']);
+          lessons = List<Map<String, dynamic>>.from(data['lessons']);
           isLoading = false;
         });
       } else {
@@ -44,7 +44,7 @@ class _LessonsPageState extends State<LessonsPage> {
 
   @override
   Widget build(BuildContext context) {
-    double screenHeight = MediaQuery.of(context).size.height; // Get screen height
+    double screenHeight = MediaQuery.of(context).size.height;
 
     return Scaffold(
       appBar: AppBar(title: Text("Lessons")),
@@ -59,11 +59,7 @@ class _LessonsPageState extends State<LessonsPage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.start,
                   children: [
-                    Icon(
-                      Icons.arrow_back,
-                      size: 20,
-                      color: Colors.deepOrange,
-                    ),
+                    Icon(Icons.arrow_back, size: 20, color: Colors.deepOrange),
                     SizedBox(width: 5),
                     Flexible(
                       child: Text(
@@ -75,13 +71,9 @@ class _LessonsPageState extends State<LessonsPage> {
                 ),
               ),
 
-            // Loading Indicator
             if (isLoading)
-              Expanded(
-                child: Center(child: CircularProgressIndicator()),
-              )
+              Expanded(child: Center(child: CircularProgressIndicator()))
 
-            // Error Message
             else if (hasError)
               Expanded(
                 child: Center(
@@ -93,7 +85,6 @@ class _LessonsPageState extends State<LessonsPage> {
                 ),
               )
 
-            // No Lessons Message
             else if (lessons.isEmpty)
               Expanded(
                 child: Center(
@@ -108,21 +99,22 @@ class _LessonsPageState extends State<LessonsPage> {
                 ),
               )
 
-            // Lessons List
             else
               Expanded(
                 child: ListView.builder(
                   itemCount: lessons.length,
                   itemBuilder: (context, index) {
                     final lesson = lessons[index];
+                    final lessonName = lesson['lesson_name'] ?? 'Untitled';
+                    final date = lesson['date'] ?? 'Unknown';
+                    final difficulty = lesson['difficulty'] ?? 'N/A';
 
                     return GestureDetector(
                       onTap: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => FileDetailPage(
-                                fileName: '${lesson['title']}.pdf'),
+                            builder: (context) => StartLesson(),
                           ),
                         );
                       },
@@ -138,7 +130,7 @@ class _LessonsPageState extends State<LessonsPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                lesson['title']!,
+                                lessonName,
                                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                               ),
                               SizedBox(height: 8),
@@ -152,14 +144,8 @@ class _LessonsPageState extends State<LessonsPage> {
                                     runSpacing: 4,
                                     direction: isNarrow ? Axis.vertical : Axis.horizontal,
                                     children: [
-                                      Text(
-                                        "Test Date: ${lesson['date']!}",
-                                        style: TextStyle(fontSize: 16),
-                                      ),
-                                      Text(
-                                        "Difficulty: ${lesson['difficulty']!}",
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-                                      ),
+                                      Text("Test Date: $date", style: TextStyle(fontSize: 16)),
+                                      Text("Difficulty: $difficulty", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
                                     ],
                                   );
                                 },
