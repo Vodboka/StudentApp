@@ -88,7 +88,7 @@ class _FileDetailPageState extends State<FileDetailPage> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => LessonPage(testText: extractedText), // Pass extracted text
+              builder: (context) => LessonPage(testText: widget.fileName), // Pass extracted text
             ),
           );
         }, // "+" icon

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'LessonsPage.dart';
 
 class LessonPage extends StatefulWidget {
   final String testText;
@@ -59,6 +60,8 @@ Future<void> submitLesson() async {
     'subject': subject,
     'date': testDate.toIso8601String(),
     'difficulty': difficulty,
+    'text': widget.testText,
+
   };
 
   try {
@@ -66,14 +69,14 @@ Future<void> submitLesson() async {
 
     final response = await http.post(
       Uri.parse(url),
-      headers: {'Content-Type': 'application/json'},
-      body: json.encode(lessonData),
+      headers: {'Content-Type': 'application/json; charset=utf-8'},
+      body: utf8.encode(json.encode(lessonData)), 
     );
 
     print('Response status: ${response.statusCode}');
     print('Response body: ${response.body}'); // Debugging line
 
-    if (response.statusCode == 200) {
+    if (response.statusCode == 201) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Lesson saved successfully!")),
       );
@@ -81,7 +84,9 @@ Future<void> submitLesson() async {
       // Navigate to the LessonsPage after submitting
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => LessonsPage()),
+        MaterialPageRoute(
+          builder: (context) => LessonsPage(),
+        ),
       );
     } else {
       final errorMsg = json.decode(response.body)['error'] ?? "Unknown error";
@@ -238,12 +243,4 @@ Future<void> submitLesson() async {
   }
 }
 
-class LessonsPage extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text("Lessons")),
-      body: Center(child: Text("List of lessons will be displayed here.")),
-    );
-  }
-}
+

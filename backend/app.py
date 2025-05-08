@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, make_response
 import os
 import json
 import hashlib
@@ -184,7 +184,7 @@ def get_file_content():
     if not os.path.exists(json_path):
         return jsonify({'error': 'Text not found'}), 404
 
-    with open(json_path, "r") as f:
+    with open(json_path, "r", encoding="utf-8") as f:
         lesson_data = json.load(f)
 
     # Extract only the main_text from the content part
@@ -193,7 +193,9 @@ def get_file_content():
     if not main_text:
         return jsonify({'error': 'Main text not found'}), 404
 
-    return jsonify({'main_text': main_text})
+    response = make_response(json.dumps({'main_text': main_text}, ensure_ascii=False))
+    response.headers['Content-Type'] = 'application/json; charset=utf-8'
+    return response
 
 # Load saved lessons
 def load_lessons():
@@ -247,33 +249,29 @@ def add_subject():
 def add_lesson():
     data = request.get_json()
 
-    required_fields = ["lesson_name", "subject", "date", "difficulty"]
+    required_fields = ["lesson_name", "subject", "date", "difficulty", "text"]
     if not all(field in data for field in required_fields):
         return jsonify({'error': 'Missing required lesson fields'}), 400
 
     lessons = load_lessons()
 
-    # Check if subject exists, if not, create a new one
     subject = data['subject']
     subjects = load_subjects()
 
-    # Check if the subject exists, if not, create it
     if subject not in subjects:
         subjects.append(subject)
         save_subjects(subjects)
         print(f"New subject '{subject}' created.")  # Debug log
 
-    # After creating the subject, let's verify it's saved properly
     if subject not in load_subjects():
         return jsonify({'error': f'Subject "{subject}" could not be saved.'}), 500
 
-    # Add the lesson to the list
     lessons.append({
         'lesson_name': data['lesson_name'],
         'subject': subject,
         'date': data['date'],
         'difficulty': data['difficulty'],
-        'text': data.get('text', '')
+        'text': data['text']  # <-- no default needed now, it's required
     })
 
     save_lessons(lessons)
@@ -283,9 +281,11 @@ def add_lesson():
             'lesson_name': data['lesson_name'],
             'subject': subject,
             'date': data['date'],
-            'difficulty': data['difficulty']
+            'difficulty': data['difficulty'],
+            'text': data['text']  # Include it in the response
         }
     }), 201
+
 
 # API to retrieve all saved lessons
 @app.route('/get_lessons', methods=['GET'])
