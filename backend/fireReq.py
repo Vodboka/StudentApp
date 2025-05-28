@@ -1,29 +1,31 @@
 import json
 import os
 import requests
+import sys
+import hashlib
 from pydantic import BaseModel, Field
 from typing import List
-import openai  
+import openai
 
 # Set your Fireworks API key
-FIREWORKS_API_KEY = "my_API_Key"  
+FIREWORKS_API_KEY = ""
 
-# Initialize the Fireworks client
+# Initialize Fireworks client
 client = openai.OpenAI(
     base_url="https://api.fireworks.ai/inference/v1",
     api_key=FIREWORKS_API_KEY,
 )
 
-# Define the Pydantic schema for a single question
+# --- Pydantic Schemas ---
 class Question(BaseModel):
     question: str
     choices: List[str] = Field(..., min_items=4, max_items=4)
     correct_answer: int = Field(..., ge=0, le=3)
 
-# Define the Pydantic schema for the list of questions
 class QuestionList(BaseModel):
     questions: List[Question]
 
+# --- Core Functions ---
 def llm(text):
     user_prompt = f"""
 You are a question generator. Given a source text, generate 10 multiple-choice questions in strict JSON format.
@@ -41,7 +43,6 @@ Only return a valid JSON object with a "questions" key containing an array of qu
 Text:
 {text}
 """
-
     try:
         completion = client.chat.completions.create(
             model="accounts/fireworks/models/llama-v3p1-8b-instruct",
@@ -54,13 +55,10 @@ Text:
             frequency_penalty=0
         )
         content = completion.choices[0].message.content
-        print("Raw model response:\n", content)
-
-        # Parse the JSON response into the QuestionList schema
         parsed = QuestionList.model_validate_json(content)
         return parsed.questions
     except Exception as e:
-        print(f"Failed to get or parse completion: {e}")
+        print(f"Failed to get or parse completion: {e}", file=sys.stderr)
         return []
 
 def getMaterials(filename):
@@ -68,34 +66,45 @@ def getMaterials(filename):
     response = requests.get(url)
     if response.status_code == 200:
         text = response.text
-        word_count = len(text.split())
-        return text, word_count
+        return text, len(text.split())
     else:
-        return f"Error {response.status_code}: {response.text}", 0
+        raise Exception(f"Failed to get file content: {response.status_code} {response.text}")
 
 def split_text_by_word_count(text, max_words=1000):
     words = text.split()
     return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
 
-# --- Main Execution ---
-filename = "103A.pdf"
-text, no_words = getMaterials(filename)
-parts = split_text_by_word_count(text, max_words=500)
+# --- Main Entry ---
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python process_text.py <filename>", file=sys.stderr)
+        sys.exit(1)
 
-all_questions = []
+    input_filename = sys.argv[1]
 
-# To test only one part
-questions = llm(parts[9])
-if questions:
-    all_questions.extend([q.model_dump() for q in questions])
+    try:
+        text, _ = getMaterials(input_filename)
+        parts = split_text_by_word_count(text, max_words=1000)
 
-# Uncomment to process all parts
-# for i, part in enumerate(parts):
-#     print(f"Processing part {i + 1}...")
-#     questions = llm(part)
-#     if questions:
-#         all_questions.extend([q.model_dump() for q in questions])
+        all_questions = []
+        for part in parts:
+            questions = llm(part)
+            if questions:
+                all_questions.extend([q.model_dump() for q in questions])
 
-os.makedirs("processed", exist_ok=True)
-with open("processed/questions.json", "w", encoding="utf-8") as f:
-    json.dump(all_questions, f, ensure_ascii=False, indent=4)
+        os.makedirs("processed", exist_ok=True)
+
+        # Generate short hash from filename
+        hash_digest = hashlib.sha256(input_filename.encode()).hexdigest()[:8]
+        output_filename = f"{hash_digest}.json"
+        output_path = os.path.join("processed", output_filename)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(all_questions, f, ensure_ascii=False, indent=4)
+
+        # Output filename for Flask route to capture
+        print(output_filename)
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)

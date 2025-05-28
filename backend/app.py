@@ -5,6 +5,8 @@ import hashlib
 import fitz  # PyMuPDF for PDF text extraction
 import re
 from collections import Counter  # To find most common font size
+import subprocess 
+import fireReq
 
 app = Flask(__name__)
 
@@ -253,15 +255,25 @@ def add_lesson():
     if not all(field in data for field in required_fields):
         return jsonify({'error': 'Missing required lesson fields'}), 400
 
-    lessons = load_lessons()
+    try:
+        result = subprocess.run(
+            ['python3', 'fireReq.py', data['text']],  # Pass actual filename here
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        processed_filename = result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        return jsonify({'error': f'Script error: {e.stderr}'}), 500
 
+    lessons = load_lessons()
     subject = data['subject']
     subjects = load_subjects()
 
     if subject not in subjects:
         subjects.append(subject)
         save_subjects(subjects)
-        print(f"New subject '{subject}' created.")  # Debug log
+        print(f"New subject '{subject}' created.")
 
     if subject not in load_subjects():
         return jsonify({'error': f'Subject "{subject}" could not be saved.'}), 500
@@ -271,10 +283,12 @@ def add_lesson():
         'subject': subject,
         'date': data['date'],
         'difficulty': data['difficulty'],
-        'text': data['text']  # <-- no default needed now, it's required
+        'text': data['text'],
+        'processed filename': processed_filename.strip()
     })
 
     save_lessons(lessons)
+
     return jsonify({
         'message': f'Lesson "{data["lesson_name"]}" added successfully under subject "{subject}"',
         'lesson': {
@@ -282,7 +296,8 @@ def add_lesson():
             'subject': subject,
             'date': data['date'],
             'difficulty': data['difficulty'],
-            'text': data['text']  # Include it in the response
+            'text': data['text'],
+            'processed filename': processed_filename.strip()
         }
     }), 201
 

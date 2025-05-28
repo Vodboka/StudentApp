@@ -1,2 +1,5 @@
 backend/TODOS.txt
 backend/res
+backend/.venv
+backend/processed
+backend/requirements.txt
