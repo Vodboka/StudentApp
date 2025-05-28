@@ -308,6 +308,23 @@ def get_lessons():
     lessons = load_lessons()
     return jsonify({'lessons': lessons}), 200
 
+# API to retrieve a specific lesson by lesson_name and subject
+@app.route('/get_lesson_hash', methods=['GET'])
+def get_lesson():
+    lesson_name = request.args.get('lesson_name')
+    subject = request.args.get('subject')
+
+    if not lesson_name or not subject:
+        return jsonify({'error': 'Missing lesson_name or subject parameter'}), 400
+
+    lessons = load_lessons()
+    for lesson in lessons:
+        if lesson['lesson_name'] == lesson_name and lesson['subject'] == subject:
+            return jsonify({'lesson hash': lesson['processed filename']}), 200
+
+    return jsonify({'error': 'Lesson not found'}), 404
+
+
 # API to update a lesson (change its details)
 @app.route('/update_lesson', methods=['POST'])
 def update_lesson():
@@ -336,6 +353,25 @@ def update_lesson():
 
     save_lessons(lessons)
     return jsonify({'message': 'Lesson updated successfully'}), 200
+
+#API to return questions based on hashcode
+@app.route('/get_processed_file/<hashcode>', methods=['GET'])
+def get_processed_file(hashcode):
+    # Build the path to the JSON file
+    filename = f"{hashcode}"
+    filepath = os.path.join("processed", filename)
+
+    # Check if file exists
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
+
+    try:
+        with open(filepath, 'r') as file:
+            data = json.load(file)
+        return jsonify(data), 200
+    except Exception as e:
+        return jsonify({'error': f'Failed to read file: {str(e)}'}), 500
+
 
 # Run Flask App
 if __name__ == '__main__':

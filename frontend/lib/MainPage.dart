@@ -84,8 +84,6 @@ class _MyHomePageState extends State<MyHomePage> {
         page = MaterialsPage();
       case 2:
         page = LessonsPage();
-      case 3:
-        page = StartLesson();
       default:
         throw UnimplementedError('No widget for $selectedIndex');
     }

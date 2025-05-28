@@ -105,7 +105,7 @@ class _LessonsPageState extends State<LessonsPage> {
                   itemCount: lessons.length,
                   itemBuilder: (context, index) {
                     final lesson = lessons[index];
-                    final lessonName = lesson['lesson_name'] ?? 'Untitled';
+                    final lessonNamehere = lesson['lesson_name'] ?? 'Untitled';
                     final date = lesson['date'] ?? 'Unknown';
                     final difficulty = lesson['difficulty'] ?? 'N/A';
 
@@ -114,7 +114,10 @@ class _LessonsPageState extends State<LessonsPage> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => StartLesson(),
+                            builder: (context) => StartLesson(
+                                  lessonName: lessonNamehere,
+                                  subject: lesson['subject'],
+                            ),
                           ),
                         );
                       },
@@ -130,7 +133,7 @@ class _LessonsPageState extends State<LessonsPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                lessonName,
+                                lessonNamehere,
                                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                               ),
                               SizedBox(height: 8),

@@ -1,10 +1,72 @@
 // ignore_for_file: file_names
-
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 class StartLesson extends StatefulWidget {
+  final String lessonName;
+  final String subject;
+
+  StartLesson({required this.lessonName, required this.subject});
+
   @override
   _StartLesson createState() => _StartLesson();
+}
+
+class LessonService {
+  static const String baseUrl = 'http://10.0.2.2:5000';
+
+  Future<String?> fetchLessonHash({
+    required String lessonName,
+    required String subject,
+  }) async {
+    final uri = Uri.parse('$baseUrl/get_lesson_hash').replace(queryParameters: {
+      'lesson_name': lessonName,
+      'subject': subject,
+    });
+
+    final response = await http.get(uri);
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return data['lesson hash'] as String?;
+    } else {
+      print('Error fetching lesson hash: ${response.body}');
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>?> fetchProcessedFile(String hashcode) async {
+    final uri = Uri.parse('$baseUrl/get_processed_file/$hashcode');
+
+    final response = await http.get(uri);
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+
+      if (data is List) {
+        return data.map<Map<String, dynamic>>((item) => Map<String, dynamic>.from(item)).toList();
+      } else {
+        print('Unexpected JSON format: expected a list');
+        return null;
+      }
+    } else {
+      print('Error fetching processed file: ${response.body}');
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>?> getQuestionsForLesson({
+    required String lessonName,
+    required String subject,
+  }) async {
+    final hash = await fetchLessonHash(lessonName: lessonName, subject: subject);
+    if (hash == null) {
+      print('Could not fetch lesson hash');
+      return null;
+    }
+    return await fetchProcessedFile(hash);
+  }
 }
 
 class _StartLesson extends State<StartLesson> {
@@ -12,24 +74,45 @@ class _StartLesson extends State<StartLesson> {
   int correctAnswers = 0;
   int? selectedAnswerIndex;
   bool isAnswerChecked = false;
+  bool isLoading = true;
 
-  List<Map<String, dynamic>> questions = [
-    {
-      'question': 'What is 2 + 2?',
-      'choices': ['3', '4', '5', '6'],
-      'correctAnswerIndex': 1,
-    },
-    {
-      'question': 'What is the capital of France?',
-      'choices': ['London', 'Berlin', 'Paris', 'Madrid'],
-      'correctAnswerIndex': 2,
-    },
-    {
-      'question': 'Which animal is the largest?',
-      'choices': ['Elephant', 'Giraffe', 'Whale', 'Lion'],
-      'correctAnswerIndex': 2,
-    },
-  ];
+  List<Map<String, dynamic>> questions = [];
+
+  @override
+  void initState() {
+    super.initState();
+    loadQuestions();
+  }
+
+  void loadQuestions() async {
+    setState(() {
+      isLoading = true;
+    });
+
+    final lessonService = LessonService();
+
+    final fetchedQuestions = await lessonService.getQuestionsForLesson(
+      lessonName: widget.lessonName,
+      subject: widget.subject,
+    );
+
+    if (fetchedQuestions != null) {
+      setState(() {
+        questions = fetchedQuestions;
+        currentQuestionIndex = 0;
+        correctAnswers = 0;
+        selectedAnswerIndex = null;
+        isAnswerChecked = false;
+        isLoading = false;
+      });
+    } else {
+      // Could not fetch questions — handle error or fallback
+      setState(() {
+        isLoading = false;
+      });
+      // Optionally show an error dialog/snackbar here
+    }
+  }
 
   void validateAnswer() {
     if (selectedAnswerIndex == null || isAnswerChecked) return;
@@ -37,7 +120,7 @@ class _StartLesson extends State<StartLesson> {
     setState(() {
       isAnswerChecked = true;
 
-      if (selectedAnswerIndex == questions[currentQuestionIndex]['correctAnswerIndex']) {
+      if (selectedAnswerIndex == questions[currentQuestionIndex]['correct_answer']) {
         correctAnswers++;
       }
     });
@@ -52,8 +135,7 @@ class _StartLesson extends State<StartLesson> {
         selectedAnswerIndex = null;
         isAnswerChecked = false;
       } else {
-        // Quiz done: Optionally handle completion
-        // For now, we'll restart
+        // Quiz finished - restart or handle differently
         currentQuestionIndex = 0;
         selectedAnswerIndex = null;
         isAnswerChecked = false;
@@ -64,6 +146,20 @@ class _StartLesson extends State<StartLesson> {
 
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return Scaffold(
+        appBar: AppBar(title: Text("Lesson")),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (questions.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text("Lesson")),
+        body: Center(child: Text("No questions available")),
+      );
+    }
+
     double progress = (currentQuestionIndex + 1) / questions.length;
 
     return Scaffold(
@@ -90,7 +186,7 @@ class _StartLesson extends State<StartLesson> {
             SizedBox(height: 20),
             ...List.generate(questions[currentQuestionIndex]['choices'].length, (index) {
               bool isSelected = selectedAnswerIndex == index;
-              bool isCorrect = isAnswerChecked && index == questions[currentQuestionIndex]['correctAnswerIndex'];
+              bool isCorrect = isAnswerChecked && index == questions[currentQuestionIndex]['correct_answer'];
               bool isIncorrect = isAnswerChecked && isSelected && !isCorrect;
 
               return Padding(
@@ -104,7 +200,7 @@ class _StartLesson extends State<StartLesson> {
                           });
                         },
                   style: ButtonStyle(
-                    backgroundColor: WidgetStateProperty.all(
+                    backgroundColor: MaterialStateProperty.all(
                       isCorrect
                           ? Colors.green
                           : isIncorrect
@@ -113,7 +209,7 @@ class _StartLesson extends State<StartLesson> {
                                   ? const Color.fromARGB(255, 255, 195, 106)
                                   : Colors.grey[300]),
                     ),
-                    shape: WidgetStateProperty.all(RoundedRectangleBorder(
+                    shape: MaterialStateProperty.all(RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     )),
                   ),
@@ -126,7 +222,6 @@ class _StartLesson extends State<StartLesson> {
             }),
             SizedBox(height: 20),
 
-            // Validate / Next button
             Padding(
               padding: EdgeInsets.only(bottom: 16),
               child: ElevatedButton(

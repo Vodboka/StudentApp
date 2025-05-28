@@ -42,65 +42,72 @@ class _LessonPageState extends State<LessonPage> {
     }
   }
 
-Future<void> submitLesson() async {
-  final String lessonName = _lessonNameController.text.trim();
-  final String? difficulty = _selectedDifficulty;
-  final DateTime? testDate = _selectedDate;
-  final String subject = _subjectController.text.trim();
+  Future<void> submitLesson() async {
+    final String lessonName = _lessonNameController.text.trim();
+    final String? difficulty = _selectedDifficulty;
+    final DateTime? testDate = _selectedDate;
+    final String subject = _subjectController.text.trim();
 
-  if (lessonName.isEmpty || difficulty == null || testDate == null || subject.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Please fill in all fields")),
-    );
-    return;
-  }
-
-  final Map<String, dynamic> lessonData = {
-    'lesson_name': lessonName,
-    'subject': subject,
-    'date': testDate.toIso8601String(),
-    'difficulty': difficulty,
-    'text': widget.testText,
-
-  };
-
-  try {
-    final url = 'http://10.0.2.2:5000/add_lesson';
-
-    final response = await http.post(
-      Uri.parse(url),
-      headers: {'Content-Type': 'application/json; charset=utf-8'},
-      body: utf8.encode(json.encode(lessonData)), 
-    );
-
-    print('Response status: ${response.statusCode}');
-    print('Response body: ${response.body}'); // Debugging line
-
-    if (response.statusCode == 201) {
+    if (lessonName.isEmpty || difficulty == null || testDate == null || subject.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Lesson saved successfully!")),
+        SnackBar(content: Text("Please fill in all fields")),
+      );
+      return;
+    }
+
+    // Show loading screen while submitting
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => LoadingScreen()));
+
+    final Map<String, dynamic> lessonData = {
+      'lesson_name': lessonName,
+      'subject': subject,
+      'date': testDate.toIso8601String(),
+      'difficulty': difficulty,
+      'text': widget.testText,
+    };
+
+    try {
+      final url = 'http://10.0.2.2:5000/add_lesson';
+
+      final response = await http.post(
+        Uri.parse(url),
+        headers: {'Content-Type': 'application/json; charset=utf-8'},
+        body: utf8.encode(json.encode(lessonData)),
       );
 
-      // Navigate to the LessonsPage after submitting
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => LessonsPage(),
-        ),
-      );
-    } else {
-      final errorMsg = json.decode(response.body)['error'] ?? "Unknown error";
+      print('Response status: ${response.statusCode}');
+      print('Response body: ${response.body}');
+
+      // Remove loading screen
+      Navigator.of(context).pop();
+
+      if (response.statusCode == 201) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Lesson saved successfully!")),
+        );
+
+        // Navigate to LessonsPage after submitting
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => LessonsPage(),
+          ),
+        );
+      } else {
+        final errorMsg = json.decode(response.body)['error'] ?? "Unknown error";
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $errorMsg")),
+        );
+      }
+    } catch (e) {
+      // Remove loading screen
+      Navigator.of(context).pop();
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error: $errorMsg")),
+        SnackBar(content: Text("Network error: ${e.toString()}")),
       );
     }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text("Network error: ${e.toString()}")),
-    );
   }
-}
-
 
   Future<void> _pickDate(BuildContext context) async {
     DateTime? pickedDate = await showDatePicker(
@@ -243,4 +250,25 @@ Future<void> submitLesson() async {
   }
 }
 
-
+// New loading screen widget
+class LoadingScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text("Submitting Lesson"),
+        automaticallyImplyLeading: false, // disable back button
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 20),
+            Text("Please wait, submitting your lesson..."),
+          ],
+        ),
+      ),
+    );
+  }
+}
