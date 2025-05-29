@@ -1,13 +1,14 @@
 // ignore_for_file: file_names
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 class StartLesson extends StatefulWidget {
-  final String lessonName;
-  final String subject;
+  final int lessonNumber;
+  final String hash;
 
-  StartLesson({required this.lessonName, required this.subject});
+  StartLesson({required this.lessonNumber, required this.hash});
 
   @override
   _StartLesson createState() => _StartLesson();
@@ -16,56 +17,31 @@ class StartLesson extends StatefulWidget {
 class LessonService {
   static const String baseUrl = 'http://10.0.2.2:5000';
 
-  Future<String?> fetchLessonHash({
-    required String lessonName,
-    required String subject,
-  }) async {
-    final uri = Uri.parse('$baseUrl/get_lesson_hash').replace(queryParameters: {
-      'lesson_name': lessonName,
-      'subject': subject,
+  Future<List<Map<String, dynamic>>?> fetchQuestions(String hash, int lessonNumber) async {
+    final uri = Uri.parse('$baseUrl/get_lesson_questions')
+        .replace(queryParameters: {
+      'hash': hash,
+      'lesson_number': lessonNumber.toString(),
     });
 
     final response = await http.get(uri);
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
-      return data['lesson hash'] as String?;
-    } else {
-      print('Error fetching lesson hash: ${response.body}');
-      return null;
-    }
-  }
+      final questions = data['questions'];
 
-  Future<List<Map<String, dynamic>>?> fetchProcessedFile(String hashcode) async {
-    final uri = Uri.parse('$baseUrl/get_processed_file/$hashcode');
-
-    final response = await http.get(uri);
-
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-
-      if (data is List) {
-        return data.map<Map<String, dynamic>>((item) => Map<String, dynamic>.from(item)).toList();
+      if (questions is List) {
+        return questions
+            .map<Map<String, dynamic>>((item) => Map<String, dynamic>.from(item))
+            .toList();
       } else {
-        print('Unexpected JSON format: expected a list');
+        print('Unexpected response format.');
         return null;
       }
     } else {
-      print('Error fetching processed file: ${response.body}');
+      print('Error fetching lesson questions: ${response.body}');
       return null;
     }
-  }
-
-  Future<List<Map<String, dynamic>>?> getQuestionsForLesson({
-    required String lessonName,
-    required String subject,
-  }) async {
-    final hash = await fetchLessonHash(lessonName: lessonName, subject: subject);
-    if (hash == null) {
-      print('Could not fetch lesson hash');
-      return null;
-    }
-    return await fetchProcessedFile(hash);
   }
 }
 
@@ -91,10 +67,8 @@ class _StartLesson extends State<StartLesson> {
 
     final lessonService = LessonService();
 
-    final fetchedQuestions = await lessonService.getQuestionsForLesson(
-      lessonName: widget.lessonName,
-      subject: widget.subject,
-    );
+    final fetchedQuestions =
+        await lessonService.fetchQuestions(widget.hash, widget.lessonNumber);
 
     if (fetchedQuestions != null) {
       setState(() {
@@ -106,11 +80,9 @@ class _StartLesson extends State<StartLesson> {
         isLoading = false;
       });
     } else {
-      // Could not fetch questions — handle error or fallback
       setState(() {
         isLoading = false;
       });
-      // Optionally show an error dialog/snackbar here
     }
   }
 
@@ -148,14 +120,14 @@ class _StartLesson extends State<StartLesson> {
   Widget build(BuildContext context) {
     if (isLoading) {
       return Scaffold(
-        appBar: AppBar(title: Text("Lesson")),
+        appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
     if (questions.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: Text("Lesson")),
+        appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),
         body: Center(child: Text("No questions available")),
       );
     }
@@ -163,9 +135,7 @@ class _StartLesson extends State<StartLesson> {
     double progress = (currentQuestionIndex + 1) / questions.length;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text("Lesson"),
-      ),
+      appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(

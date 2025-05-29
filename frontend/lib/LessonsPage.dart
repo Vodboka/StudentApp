@@ -3,7 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'StartLesson.dart';
+import 'package:test_application/LessonCirclesPage.dart';
+
 
 class LessonsPage extends StatefulWidget {
   @override
@@ -110,17 +111,41 @@ class _LessonsPageState extends State<LessonsPage> {
                     final difficulty = lesson['difficulty'] ?? 'N/A';
 
                     return GestureDetector(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => StartLesson(
-                                  lessonName: lessonNamehere,
-                                  subject: lesson['subject'],
-                            ),
-                          ),
-                        );
+                      onTap: () async {
+                        final uri = Uri.parse('http://10.0.2.2:5000/get_lesson_hash').replace(queryParameters: {
+                          'lesson_name': lessonNamehere,
+                          'subject': lesson['subject'],
+                        });
+
+                        try {
+                          final response = await http.get(uri);
+
+                          if (response.statusCode == 200) {
+                            final data = json.decode(response.body);
+                            final hash = data['lesson hash'];
+
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => LessonCirclesPage(
+                                  hash: hash,
+                                ),
+                              ),
+                            );
+                          } else {
+                            // Handle error — lesson not found
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text("Lesson hash not found")),
+                            );
+                          }
+                        } catch (e) {
+                          // Handle request failure
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text("Failed to fetch lesson hash")),
+                          );
+                        }
                       },
+
                       child: Card(
                         margin: EdgeInsets.symmetric(vertical: 8.0),
                         elevation: 3,

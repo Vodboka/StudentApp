@@ -109,10 +109,6 @@ class _MyHomePageState extends State<MyHomePage> {
                       icon: Icon(Icons.new_label), 
                       label: Text ('Lessons')
                       ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.play_arrow), // New icon for StartLesson
-                      label: Text('Start Lesson'), // New label for StartLesson
-                    )  
                   ],
                   selectedIndex: selectedIndex,
                   onDestinationSelected: (value) {

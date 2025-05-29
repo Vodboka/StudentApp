@@ -3,10 +3,12 @@ import json
 import os
 import requests
 import re
+from getToken import receiveToken
 
 # Initialize the client
+# the key is under a sepparate script under gitingnore
 client = InferenceClient(
-    api_key="" 
+    api_key=receiveToken("HF")
 )
 
 def try_parse_json_block(text):
@@ -80,12 +82,12 @@ questions = llm(parts[9])
 if questions:
     all_questions.extend(questions)
 
-# Uncomment to process all parts
-# for i, part in enumerate(parts):
-#     print(f"Processing part {i + 1}...")
-#     questions = llm(part)
-#     if questions:
-#         all_questions.extend(questions)
+
+for i, part in enumerate(parts):
+    print(f"Processing part {i + 1}...")
+    questions = llm(part)
+    if questions:
+        all_questions.extend(questions)
 
 os.makedirs("processed", exist_ok=True)
 with open("processed/questions.json", "w", encoding="utf-8") as f:

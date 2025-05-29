@@ -3,3 +3,5 @@ backend/res
 backend/.venv
 backend/processed
 backend/requirements.txt
+backend/getToken.py
+backend/__pycache__

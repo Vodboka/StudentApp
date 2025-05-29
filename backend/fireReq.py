@@ -6,9 +6,11 @@ import hashlib
 from pydantic import BaseModel, Field
 from typing import List
 import openai
+from getToken import receiveToken
 
 # Set your Fireworks API key
-FIREWORKS_API_KEY = ""
+#the key is in a sepparate script  under gitignore
+FIREWORKS_API_KEY = receiveToken("FW")
 
 # Initialize Fireworks client
 client = openai.OpenAI(
