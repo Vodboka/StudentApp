@@ -17,7 +17,8 @@ SUBJECTS_FILE = os.path.join(RES_FOLDER, "subjects.json")
 LESSONS_FILE = os.path.join(RES_FOLDER, "lessons.json")
 FILE_RECORD = os.path.join(RES_FOLDER, "files.json")
 LESSONS_RECORD = os.path.join(RES_FOLDER, "lessons")
-PROCESSED_FOLDER = "processed" # Define processed folder for clarity
+
+PROCESSED_FOLDER = "processed" 
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TEXTS_FOLDER, exist_ok=True)

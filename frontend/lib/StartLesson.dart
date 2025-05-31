@@ -51,8 +51,10 @@ class _StartLesson extends State<StartLesson> {
   int? selectedAnswerIndex;
   bool isAnswerChecked = false;
   bool isLoading = true;
+  bool quizCompleted = false;
 
   List<Map<String, dynamic>> questions = [];
+  List<Map<String, dynamic>> incorrectQuestions = [];
 
   @override
   void initState() {
@@ -66,7 +68,6 @@ class _StartLesson extends State<StartLesson> {
     });
 
     final lessonService = LessonService();
-
     final fetchedQuestions =
         await lessonService.fetchQuestions(widget.hash, widget.lessonNumber);
 
@@ -78,6 +79,8 @@ class _StartLesson extends State<StartLesson> {
         selectedAnswerIndex = null;
         isAnswerChecked = false;
         isLoading = false;
+        incorrectQuestions.clear();
+        quizCompleted = false;
       });
     } else {
       setState(() {
@@ -94,6 +97,8 @@ class _StartLesson extends State<StartLesson> {
 
       if (selectedAnswerIndex == questions[currentQuestionIndex]['correct_answer']) {
         correctAnswers++;
+      } else {
+        incorrectQuestions.add(questions[currentQuestionIndex]);
       }
     });
   }
@@ -102,17 +107,24 @@ class _StartLesson extends State<StartLesson> {
     if (!isAnswerChecked) return;
 
     setState(() {
+      if (correctAnswers >= 15) {
+        quizCompleted = true;
+        return;
+      }
+
       if (currentQuestionIndex < questions.length - 1) {
         currentQuestionIndex++;
-        selectedAnswerIndex = null;
-        isAnswerChecked = false;
-      } else {
-        // Quiz finished - restart or handle differently
+      } else if (incorrectQuestions.isNotEmpty) {
+        questions = List.from(incorrectQuestions);
+        incorrectQuestions.clear();
         currentQuestionIndex = 0;
-        selectedAnswerIndex = null;
-        isAnswerChecked = false;
-        correctAnswers = 0;
+      } else {
+        quizCompleted = true;
+        return;
       }
+
+      selectedAnswerIndex = null;
+      isAnswerChecked = false;
     });
   }
 
@@ -129,6 +141,19 @@ class _StartLesson extends State<StartLesson> {
       return Scaffold(
         appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),
         body: Center(child: Text("No questions available")),
+      );
+    }
+
+    if (quizCompleted) {
+      return Scaffold(
+        appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),
+        body: Center(
+          child: Text(
+            "Lesson Complete!\nCorrect Answers: $correctAnswers",
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+        ),
       );
     }
 
@@ -191,7 +216,6 @@ class _StartLesson extends State<StartLesson> {
               );
             }),
             SizedBox(height: 20),
-
             Padding(
               padding: EdgeInsets.only(bottom: 16),
               child: ElevatedButton(
@@ -210,7 +234,6 @@ class _StartLesson extends State<StartLesson> {
                 ),
               ),
             ),
-
             Text(
               'Correct Answers: $correctAnswers',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
