@@ -9,7 +9,7 @@ import 'package:file_picker/file_picker.dart';
 
 import 'LessonsPage.dart';
 import 'MaterialsPage.dart';
-import 'StartLesson.dart';
+
 void main() {
   runApp(MyApp());
 }
@@ -47,7 +47,7 @@ class MyApp extends StatelessWidget {
         title: 'Text Uploader',
         theme: ThemeData(
           useMaterial3: true,
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
+          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blueAccent),
         ),
         home: MyHomePage(),
       ),

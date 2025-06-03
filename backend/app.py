@@ -24,7 +24,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TEXTS_FOLDER, exist_ok=True)
 os.makedirs(RES_FOLDER, exist_ok=True)
 os.makedirs(LESSONS_RECORD, exist_ok=True)
-os.makedirs(PROCESSED_FOLDER, exist_ok=True) # Ensure processed folder exists
+os.makedirs(PROCESSED_FOLDER, exist_ok=True) 
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
@@ -132,9 +132,6 @@ def upload_file():
 
 @app.route('/get_files', methods=['GET'])
 def get_files():
-    # This call to make_lesson_path with a hardcoded hash might be for testing.
-    # In a real application, this should be triggered by a lesson creation event.
-    make_lesson_path("43c64af6")
     return jsonify({'files': load_uploaded_files()})
 
 @app.route('/get_file', methods=['GET'])
@@ -219,6 +216,12 @@ def make_lesson_path(hashProcessed):
     
     # load_questions expects the filename with .json, so append it here
     questions = load_questions(hashProcessed + ".json")
+
+    # Add tracking fields to each question
+    for question in questions:
+        question['number_of_tries'] = 0
+        question['number_of_correct_tries'] = 0
+
     total_questions = len(questions)
     full_chunks = total_questions // 15
 
@@ -235,12 +238,27 @@ def make_lesson_path(hashProcessed):
         save_questions_in_lessons(questions[-leftover:], LESSON_FILE)
 
 
+
 @app.route('/add_lesson', methods=['POST'])
 def add_lesson():
     data = request.get_json()
     required_fields = ["lesson_name", "subject", "date", "difficulty", "text"]
     if not all(field in data for field in required_fields):
         return jsonify({'error': 'Missing required lesson fields'}), 400
+
+    processed_filename = None
+
+    def is_json_file_empty(json_path):
+        if os.path.exists(json_path):
+            with open(json_path, "r", encoding="utf-8") as f:
+                try:
+                    data = json.load(f)
+                    return not data  # True if [] or {}
+                except json.JSONDecodeError:
+                    return True
+        return True
+
+    # Run fireReq
     try:
         result = subprocess.run(
             ['python3', 'fireReq.py', data['text']],
@@ -249,31 +267,80 @@ def add_lesson():
             check=True
         )
         processed_filename = result.stdout.strip()
-        # CRITICAL FIX: Ensure processed_filename does not contain .json extension
-        # This makes sure that the hash stored and passed around is clean.
-        if processed_filename.endswith('.json'):
-            processed_filename = processed_filename[:-5] # Remove '.json'
+        print(f"[INFO] fireReq.py succeeded with output: {processed_filename}")
+
+        # Check if the output file is empty
+        full_path = os.path.join("processed", f"{processed_filename}")
+        if is_json_file_empty(full_path):
+            print("[WARNING] fireReq.py output was empty. Deleting and falling back to huggingReq.py")
+            os.remove(full_path)
+
+            # Try huggingReq
+            result = subprocess.run(
+                ['python3', 'huggingReq.py', data['text']],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            processed_filename = result.stdout.strip()
+            print(f"[INFO] huggingReq.py succeeded with output: {processed_filename}")
+
+            full_path = os.path.join("processed", f"{processed_filename}")
+            if is_json_file_empty(full_path):
+                print("[ERROR] huggingReq.py also returned empty content.")
+                os.remove(full_path)
+                return jsonify({'error': 'Both generation methods returned empty content.'}), 500
 
     except subprocess.CalledProcessError as e:
-        return jsonify({'error': f'Script error: {e.stderr}'}), 500
+        print(f"[ERROR] fireReq.py failed: {e.stderr}")
+        print("[INFO] Falling back to huggingReq.py...")
+
+        try:
+            result = subprocess.run(
+                ['python3', 'huggingReq.py', data['text']],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            processed_filename = result.stdout.strip()
+            print(f"[INFO] huggingReq.py succeeded with output: {processed_filename}")
+
+            full_path = os.path.join("processed", f"{processed_filename}")
+            if is_json_file_empty(full_path):
+                print("[ERROR] huggingReq.py also returned empty content.")
+                os.remove(full_path)
+                return jsonify({'error': 'Both generation methods returned empty content.'}), 500
+
+        except subprocess.CalledProcessError as e2:
+            print(f"[ERROR] huggingReq.py also failed: {e2.stderr}")
+            return jsonify({'error': 'Both generation methods failed.'}), 500
+
+    # Clean .json extension
+    if processed_filename.endswith('.json'):
+        processed_filename = processed_filename[:-5]
+
+    # Save lesson metadata
     lessons = load_lessons()
     subject = data['subject']
     subjects = load_subjects()
     if subject not in subjects:
         subjects.append(subject)
         save_subjects(subjects)
+
     lessons.append({
         'lesson_name': data['lesson_name'],
         'subject': subject,
         'date': data['date'],
         'difficulty': data['difficulty'],
         'text': data['text'],
-        'processed filename': processed_filename # Store just the hash here
+        'processed filename': processed_filename
     })
     save_lessons(lessons)
-    make_lesson_path(processed_filename) # Pass just the hash
+
+    make_lesson_path(processed_filename)
+
     return jsonify({
-        'message': f'Lesson "{data["lesson_name"]}" added successfully under subject "{subject}"',
+        'message': f'Lesson \"{data['lesson_name']}\" added successfully under subject \"{subject}\"',
         'lesson': {
             'lesson_name': data['lesson_name'],
             'subject': subject,
@@ -283,6 +350,9 @@ def add_lesson():
             'processed filename': processed_filename
         }
     }), 201
+
+
+
 
 @app.route('/get_lessons', methods=['GET'])
 def get_lessons():

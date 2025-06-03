@@ -195,7 +195,7 @@ class _StartLesson extends State<StartLesson> {
                           });
                         },
                   style: ButtonStyle(
-                    backgroundColor: MaterialStateProperty.all(
+                    backgroundColor: WidgetStateProperty.all(
                       isCorrect
                           ? Colors.green
                           : isIncorrect
@@ -204,7 +204,7 @@ class _StartLesson extends State<StartLesson> {
                                   ? const Color.fromARGB(255, 255, 195, 106)
                                   : Colors.grey[300]),
                     ),
-                    shape: MaterialStateProperty.all(RoundedRectangleBorder(
+                    shape: WidgetStateProperty.all(RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     )),
                   ),
