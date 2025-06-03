@@ -7,6 +7,7 @@ import re
 from collections import Counter
 import subprocess
 import fireReq
+import sys
 
 app = Flask(__name__)
 
@@ -101,6 +102,53 @@ def clean_text(text):
     text = re.sub(r'\[\d+\]|\(\d+\)', '', text)
     return text.strip()
 
+def extract_text_with_ocr_fallback(pdf_path):
+    """
+    Attempts standard text extraction first. If no main text is found,
+    falls back to OCR for text extraction.
+    """
+    print(f"INFO: Attempting standard text extraction for {pdf_path}...", file=sys.stderr)
+    main_text, footnotes = extract_text_by_dynamic_font_size(pdf_path)
+
+    if not main_text.strip():
+        print(f"WARNING: No main text found via standard extraction for {pdf_path}. Falling back to OCR...", file=sys.stderr)
+        ocr_text_parts = []
+        try:
+            with fitz.open(pdf_path) as doc:
+                for page_num, page in enumerate(doc):
+                    print(f"DEBUG: Performing OCR on page {page_num + 1} of {pdf_path}...", file=sys.stderr)
+                    
+                    # Attempt to get textpage with OCR flag
+                    try:
+                        textpage = page.get_textpage(flags=4) # Flag 4 enables OCR
+                        page_ocr_text = textpage.extractText()
+                        
+                        if page_ocr_text.strip():
+                            ocr_text_parts.append(page_ocr_text)
+                            print(f"DEBUG: OCR successfully extracted text from page {page_num + 1}.", file=sys.stderr)
+                        else:
+                            print(f"WARNING: OCR found no text on page {page_num + 1} of {pdf_path} (extracted text was empty).", file=sys.stderr)
+                    except Exception as ocr_page_e:
+                        print(f"ERROR: PyMuPDF OCR failed on page {page_num + 1}: {ocr_page_e}", file=sys.stderr)
+                        # If OCR fails on a page, it might still work on others, so don't re-raise immediately
+            
+            # If OCR found text, use it as main_text. Footnotes cannot be reliably separated.
+            if ocr_text_parts:
+                main_text = clean_text(" ".join(ocr_text_parts))
+                footnotes = "" # OCR doesn't differentiate footnotes by font size
+                print(f"INFO: Successfully extracted text from {pdf_path} using OCR.", file=sys.stderr)
+            else:
+                print(f"ERROR: OCR fallback also found no text for {pdf_path}. This indicates a very challenging PDF or a deeper OCR issue.", file=sys.stderr)
+                raise Exception("No text extracted from PDF, even with OCR fallback.")
+
+        except Exception as e:
+            print(f"CRITICAL ERROR: OCR text extraction failed for {pdf_path}: {e}", file=sys.stderr)
+            raise Exception(f"OCR text extraction failed: {e}")
+    else:
+        print(f"INFO: Standard text extraction successful for {pdf_path}.", file=sys.stderr)
+
+    return main_text, footnotes
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     if 'file' not in request.files:
@@ -108,26 +156,32 @@ def upload_file():
     file = request.files['file']
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
+    
     file_path = os.path.join(app.config["UPLOAD_FOLDER"], file.filename)
     try:
         file.save(file_path)
     except Exception as e:
         return jsonify({'error': f'Failed to save file: {str(e)}'}), 500
+    
     hashcode = generate_hash(file_path)
+    
     if file.filename not in load_uploaded_files():
         uploaded_files = load_uploaded_files()
         uploaded_files.append(file.filename)
         save_uploaded_files(uploaded_files)
+    
     try:
-        main_text, footnotes = extract_text_by_dynamic_font_size(file_path)
+        # Call the new fallback function here
+        main_text, footnotes = extract_text_with_ocr_fallback(file_path)
         save_extracted_text(hashcode, file.filename, main_text, footnotes)
     except Exception as e:
         return jsonify({'error': f'Error extracting text: {str(e)}'}), 500
+    
     return jsonify({
         'message': 'File uploaded successfully',
         'filename': file.filename,
         'hashcode': hashcode,
-        'footnotes': footnotes
+        'footnotes': footnotes # Note: footnotes will be empty if OCR was used
     }), 200
 
 @app.route('/get_files', methods=['GET'])
@@ -466,6 +520,88 @@ def get_processed_file(hashcode):
         return jsonify(data), 200
     except Exception as e:
         return jsonify({'error': f'Failed to read file: {str(e)}'}), 500
+
+def load_questions_from_lesson_chunk(hash_value, lesson_number):
+    """
+    Loads questions from a specific lesson chunk file (e.g., res/lessons/{hash}/lessonX.json).
+    """
+    # Ensure hash_value does not have .json extension
+    if hash_value.endswith('.json'):
+        hash_value = hash_value[:-5]
+
+    lesson_file_path = os.path.join(LESSONS_RECORD, hash_value, f"lesson{lesson_number}.json")
+    if os.path.exists(lesson_file_path):
+        with open(lesson_file_path, 'r', encoding="utf-8") as f:
+            return json.load(f)
+    print(f"[ERROR][Flask] Lesson chunk file not found: {lesson_file_path}", file=sys.stderr)
+    return []
+
+def save_questions_to_lesson_chunk(hash_value, lesson_number, questions_data):
+    """
+    Saves the updated list of questions back to a specific lesson chunk file.
+    """
+    # Ensure hash_value does not have .json extension
+    if hash_value.endswith('.json'):
+        hash_value = hash_value[:-5]
+
+    lesson_file_path = os.path.join(LESSONS_RECORD, hash_value, f"lesson{lesson_number}.json")
+    with open(lesson_file_path, 'w', encoding="utf-8") as f:
+        json.dump(questions_data, f, indent=4, ensure_ascii=False)
+    print(f"[INFO][Flask] Saved updated questions to lesson chunk file: {lesson_file_path}", file=sys.stderr)
+
+
+# <<<< MODIFY this existing route in your Flask app >>>>
+@app.route('/update_question_stats', methods=['POST'])
+def update_question_stats():
+    """
+    Receives updated stats (number_of_tries, number_of_correct_tries) for a specific question
+    and persists them to the relevant lesson chunk JSON file.
+    """
+    data = request.get_json()
+    if not data:
+        print("[ERROR][Flask] /update_question_stats: Request body is empty or not JSON.", file=sys.stderr)
+        return jsonify({'error': 'Request body must be JSON'}), 400
+
+    hash_value = data.get('hash')
+    lesson_number = data.get('lesson_number')
+    question_index = data.get('question_index')
+    number_of_tries = data.get('number_of_tries')
+    number_of_correct_tries = data.get('number_of_correct_tries')
+
+    # Basic validation for required fields
+    if not all([hash_value, lesson_number is not None, question_index is not None,
+                number_of_tries is not None, number_of_correct_tries is not None]):
+        print(f"[ERROR][Flask] /update_question_stats: Missing required fields. Received: {data}", file=sys.stderr)
+        return jsonify({'error': 'Missing required fields for update'}), 400
+
+    try:
+        # Load the questions from the specific lesson chunk file
+        lesson_questions = load_questions_from_lesson_chunk(hash_value, lesson_number)
+
+        if not lesson_questions:
+            # This means the lesson chunk file itself was not found or was empty
+            return jsonify({'error': 'Lesson chunk file not found or empty'}), 404
+
+        # Check if the question_index is valid within this specific lesson's questions
+        if 0 <= question_index < len(lesson_questions):
+            question_to_update = lesson_questions[question_index]
+            
+            # Update the stats for the specific question
+            question_to_update['number_of_tries'] = number_of_tries
+            question_to_update['number_of_correct_tries'] = number_of_correct_tries
+            
+            # Save the entire updated list of questions back to this specific lesson file
+            save_questions_to_lesson_chunk(hash_value, lesson_number, lesson_questions)
+            
+            print(f"[INFO][Flask] Updated stats for question {question_index} in lesson {lesson_number} (hash: {hash_value}): Tries={number_of_tries}, Correct={number_of_correct_tries}", file=sys.stderr)
+            return jsonify({'message': 'Question stats updated successfully'}), 200
+        else:
+            print(f"[ERROR][Flask] /update_question_stats: Invalid question_index: {question_index} for lesson {lesson_number} (hash: {hash_value})", file=sys.stderr)
+            return jsonify({'error': 'Invalid question index for this lesson'}), 404
+
+    except Exception as e:
+        print(f"[CRITICAL ERROR][Flask] /update_question_stats: Error updating question stats: {e}", file=sys.stderr)
+        return jsonify({'error': f'Server error: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

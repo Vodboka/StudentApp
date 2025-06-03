@@ -24,30 +24,69 @@ class LessonService {
       'lesson_number': lessonNumber.toString(),
     });
 
-    final response = await http.get(uri);
+    try {
+      final response = await http.get(uri);
 
-    if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final questions = data['questions'];
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final questions = data['questions'];
 
-      if (questions is List) {
-        return questions
-            .map<Map<String, dynamic>>((item) => Map<String, dynamic>.from(item))
-            .toList();
+        if (questions is List) {
+          return questions
+              .map<Map<String, dynamic>>((item) => Map<String, dynamic>.from(item))
+              .toList();
+        } else {
+          print('Unexpected response format.');
+          return null;
+        }
       } else {
-        print('Unexpected response format.');
+        print('Error fetching lesson questions: ${response.body}');
         return null;
       }
-    } else {
-      print('Error fetching lesson questions: ${response.body}');
+    } catch (e) {
+      print('Network error fetching lesson questions: $e');
       return null;
+    }
+  }
+
+  // New method to save updated question stats to the server
+  Future<bool> saveQuestionStats(
+      String hash,
+      int lessonNumber,
+      int questionIndex,
+      int numberOfTries,
+      int numberOfCorrectTries) async {
+    final uri = Uri.parse('$baseUrl/update_question_stats');
+    try {
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'hash': hash,
+          'lesson_number': lessonNumber,
+          'question_index': questionIndex,
+          'number_of_tries': numberOfTries,
+          'number_of_correct_tries': numberOfCorrectTries,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        print('Question stats updated successfully on server.');
+        return true;
+      } else {
+        print('Failed to update question stats on server: ${response.body}');
+        return false;
+      }
+    } catch (e) {
+      print('Network error saving question stats: $e');
+      return false;
     }
   }
 }
 
 class _StartLesson extends State<StartLesson> {
   int currentQuestionIndex = 0;
-  int correctAnswers = 0;
+  int overallCorrectAnswers = 0;
   int? selectedAnswerIndex;
   bool isAnswerChecked = false;
   bool isLoading = true;
@@ -55,6 +94,8 @@ class _StartLesson extends State<StartLesson> {
 
   List<Map<String, dynamic>> questions = [];
   List<Map<String, dynamic>> incorrectQuestions = [];
+
+  final LessonService _lessonService = LessonService(); // Instance of LessonService
 
   @override
   void initState() {
@@ -67,15 +108,18 @@ class _StartLesson extends State<StartLesson> {
       isLoading = true;
     });
 
-    final lessonService = LessonService();
     final fetchedQuestions =
-        await lessonService.fetchQuestions(widget.hash, widget.lessonNumber);
+        await _lessonService.fetchQuestions(widget.hash, widget.lessonNumber);
 
     if (fetchedQuestions != null) {
       setState(() {
         questions = fetchedQuestions;
+        for (var q in questions) {
+          q['number_of_tries'] ??= 0;
+          q['number_of_correct_tries'] ??= 0;
+        }
         currentQuestionIndex = 0;
-        correctAnswers = 0;
+        overallCorrectAnswers = 0;
         selectedAnswerIndex = null;
         isAnswerChecked = false;
         isLoading = false;
@@ -95,11 +139,25 @@ class _StartLesson extends State<StartLesson> {
     setState(() {
       isAnswerChecked = true;
 
-      if (selectedAnswerIndex == questions[currentQuestionIndex]['correct_answer']) {
-        correctAnswers++;
+      Map<String, dynamic> currentQuestion = questions[currentQuestionIndex];
+
+      currentQuestion['number_of_tries'] = (currentQuestion['number_of_tries'] ?? 0) + 1;
+
+      if (selectedAnswerIndex == currentQuestion['correct_answer']) {
+        overallCorrectAnswers++;
+        currentQuestion['number_of_correct_tries'] = (currentQuestion['number_of_correct_tries'] ?? 0) + 1;
       } else {
-        incorrectQuestions.add(questions[currentQuestionIndex]);
+        incorrectQuestions.add(currentQuestion);
       }
+      
+      // Save the updated stats to the server immediately after validation
+      _lessonService.saveQuestionStats(
+        widget.hash,
+        widget.lessonNumber,
+        currentQuestionIndex, // Pass the index of the question in the current lesson's list
+        currentQuestion['number_of_tries'],
+        currentQuestion['number_of_correct_tries'],
+      );
     });
   }
 
@@ -107,7 +165,7 @@ class _StartLesson extends State<StartLesson> {
     if (!isAnswerChecked) return;
 
     setState(() {
-      if (correctAnswers >= 15) {
+      if (overallCorrectAnswers >= 15) {
         quizCompleted = true;
         return;
       }
@@ -149,13 +207,17 @@ class _StartLesson extends State<StartLesson> {
         appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),
         body: Center(
           child: Text(
-            "Lesson Complete!\nCorrect Answers: $correctAnswers",
+            "Lesson Complete!\nOverall Correct Answers: $overallCorrectAnswers",
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
             textAlign: TextAlign.center,
           ),
         ),
       );
     }
+
+    Map<String, dynamic> currentQuestion = questions[currentQuestionIndex];
+    int currentQuestionTries = currentQuestion['number_of_tries'] ?? 0;
+    int currentQuestionCorrectTries = currentQuestion['number_of_correct_tries'] ?? 0;
 
     double progress = (currentQuestionIndex + 1) / questions.length;
 
@@ -174,14 +236,14 @@ class _StartLesson extends State<StartLesson> {
             ),
             SizedBox(height: 20),
             Text(
-              questions[currentQuestionIndex]['question'],
+              currentQuestion['question'],
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
             SizedBox(height: 20),
-            ...List.generate(questions[currentQuestionIndex]['choices'].length, (index) {
+            ...List.generate(currentQuestion['choices'].length, (index) {
               bool isSelected = selectedAnswerIndex == index;
-              bool isCorrect = isAnswerChecked && index == questions[currentQuestionIndex]['correct_answer'];
+              bool isCorrect = isAnswerChecked && index == currentQuestion['correct_answer'];
               bool isIncorrect = isAnswerChecked && isSelected && !isCorrect;
 
               return Padding(
@@ -209,7 +271,7 @@ class _StartLesson extends State<StartLesson> {
                     )),
                   ),
                   child: Text(
-                    questions[currentQuestionIndex]['choices'][index],
+                    currentQuestion['choices'][index],
                     style: TextStyle(fontSize: 18),
                   ),
                 ),
@@ -235,7 +297,18 @@ class _StartLesson extends State<StartLesson> {
               ),
             ),
             Text(
-              'Correct Answers: $correctAnswers',
+              'Overall Correct Answers: $overallCorrectAnswers',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.center,
+            ),
+            SizedBox(height: 10),
+            Text(
+              'Current Question Tries: $currentQuestionTries',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              textAlign: TextAlign.center,
+            ),
+            Text(
+              'Current Question Correct Tries: $currentQuestionCorrectTries',
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
               textAlign: TextAlign.center,
             ),

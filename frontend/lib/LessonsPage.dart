@@ -3,7 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:test_application/LessonCirclesPage.dart';
+import 'package:test_application/LessonCirclesPage.dart'; // Ensure this import is correct
+import 'package:intl/intl.dart'; // Import for date formatting. Make sure 'intl' is in your pubspec.yaml!
 
 
 class LessonsPage extends StatefulWidget {
@@ -12,7 +13,10 @@ class LessonsPage extends StatefulWidget {
 }
 
 class _LessonsPageState extends State<LessonsPage> {
-  List<Map<String, dynamic>> lessons = [];
+  // New state variables for grouped lessons
+  Map<String, List<Map<String, dynamic>>> _groupedLessons = {};
+  List<String> _subjects = []; // To maintain the order of subjects for display
+
   bool isLoading = true;
   bool hasError = false;
 
@@ -28,14 +32,35 @@ class _LessonsPageState extends State<LessonsPage> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
+        List<Map<String, dynamic>> fetchedLessons = List<Map<String, dynamic>>.from(data['lessons']);
+
+        Map<String, List<Map<String, dynamic>>> tempGroupedLessons = {};
+        List<String> tempSubjects = [];
+
+        // Group lessons by subject
+        for (var lesson in fetchedLessons) {
+          final subject = lesson['subject'] as String? ?? 'Uncategorized'; // Handle potential null subject
+          if (!tempGroupedLessons.containsKey(subject)) {
+            tempGroupedLessons[subject] = [];
+            tempSubjects.add(subject); // Add subject to our ordered list
+          }
+          tempGroupedLessons[subject]!.add(lesson);
+        }
+
+        // Sort subjects alphabetically for consistent display
+        tempSubjects.sort();
+
         setState(() {
-          lessons = List<Map<String, dynamic>>.from(data['lessons']);
+          _groupedLessons = tempGroupedLessons;
+          _subjects = tempSubjects;
           isLoading = false;
+          hasError = false; // Reset error state on successful fetch
         });
       } else {
-        throw Exception('Failed to load lessons');
+        throw Exception('Failed to load lessons with status: ${response.statusCode}');
       }
     } catch (e) {
+      print('Error fetching lessons: $e'); // Debugging
       setState(() {
         isLoading = false;
         hasError = true;
@@ -54,7 +79,8 @@ class _LessonsPageState extends State<LessonsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (lessons.isEmpty)
+            // Info message if no lessons are present (after loading)
+            if (!isLoading && !hasError && _groupedLessons.isEmpty)
               Padding(
                 padding: EdgeInsets.only(top: screenHeight * 0.01, bottom: 10.0),
                 child: Row(
@@ -72,21 +98,24 @@ class _LessonsPageState extends State<LessonsPage> {
                 ),
               ),
 
+            // Loading indicator
             if (isLoading)
               Expanded(child: Center(child: CircularProgressIndicator()))
-
+            
+            // Error message
             else if (hasError)
               Expanded(
                 child: Center(
                   child: Text(
-                    "No lessons created yet!",
+                    "Failed to load lessons. Please try again later.",
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
                     textAlign: TextAlign.center,
                   ),
                 ),
               )
-
-            else if (lessons.isEmpty)
+            
+            // "No lessons created yet" message (if loaded and empty)
+            else if (_groupedLessons.isEmpty) // Check the grouped map now
               Expanded(
                 child: Center(
                   child: Padding(
@@ -100,88 +129,121 @@ class _LessonsPageState extends State<LessonsPage> {
                 ),
               )
 
+            // Display grouped lessons
             else
               Expanded(
                 child: ListView.builder(
-                  itemCount: lessons.length,
-                  itemBuilder: (context, index) {
-                    final lesson = lessons[index];
-                    final lessonNamehere = lesson['lesson_name'] ?? 'Untitled';
-                    final date = lesson['date'] ?? 'Unknown';
-                    final difficulty = lesson['difficulty'] ?? 'N/A';
+                  itemCount: _subjects.length, // Iterate over subjects
+                  itemBuilder: (context, subjectIndex) {
+                    final subject = _subjects[subjectIndex];
+                    final lessonsInSubject = _groupedLessons[subject]!; // Get list of lessons for this subject
 
-                    return GestureDetector(
-                      onTap: () async {
-                        final uri = Uri.parse('http://10.0.2.2:5000/get_lesson_hash').replace(queryParameters: {
-                          'lesson_name': lessonNamehere,
-                          'subject': lesson['subject'],
-                        });
+                    return Card( // Wrap ExpansionTile in a Card for consistent styling
+                      margin: EdgeInsets.symmetric(vertical: 8.0, horizontal: 8.0),
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12.0),
+                      ),
+                      clipBehavior: Clip.antiAlias, // Ensures content respects rounded corners
+                      child: Theme( // <<<< MODIFIED: Wrap with Theme to control dividerColor >>>>
+                        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          title: Text(
+                            subject,
+                            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                          ),
+                          // Removed collapsedShape and expandedShape as they are not defined in older Flutter versions
+                          childrenPadding: EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                          children: lessonsInSubject.map((lesson) {
+                            final lessonNamehere = lesson['lesson_name'] ?? 'Untitled';
+                            final dateString = lesson['date'] ?? 'Unknown'; // Get the date string
+                            final difficulty = lesson['difficulty'] ?? 'N/A';
 
-                        try {
-                          final response = await http.get(uri);
+                            // Format the date for better readability
+                            String formattedDate = 'Unknown';
+                            try {
+                              // Assuming dateString is in a format like 'YYYY-MM-DD'
+                              final dateTime = DateTime.parse(dateString);
+                              formattedDate = DateFormat('MMMM d,yyyy').format(dateTime); // e.g., "June 3, 2025"
+                            } catch (e) {
+                              print('Error parsing date: $dateString - $e');
+                              formattedDate = 'Invalid Date';
+                            }
 
-                          if (response.statusCode == 200) {
-                            final data = json.decode(response.body);
-                            final hash = data['lesson hash'];
+                            return GestureDetector(
+                              onTap: () async {
+                                final uri = Uri.parse('http://10.0.2.2:5000/get_lesson_hash').replace(queryParameters: {
+                                  'lesson_name': lessonNamehere,
+                                  'subject': lesson['subject'],
+                                });
 
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => LessonCirclesPage(
-                                  hash: hash,
+                                try {
+                                  final response = await http.get(uri);
+
+                                  if (response.statusCode == 200) {
+                                    final data = json.decode(response.body);
+                                    final hash = data['lesson hash'];
+
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => LessonCirclesPage(
+                                          hash: hash,
+                                        ),
+                                      ),
+                                    );
+                                  } else {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text("Lesson hash not found")),
+                                    );
+                                  }
+                                } catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text("Failed to fetch lesson hash")),
+                                  );
+                                }
+                              },
+                              child: Card( // Inner Card for each lesson
+                                margin: EdgeInsets.symmetric(vertical: 4.0),
+                                elevation: 1, // Slightly less elevation than the subject card
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8.0),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        lessonNamehere,
+                                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                                      ),
+                                      SizedBox(height: 6),
+                                      LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          bool isNarrow = constraints.maxWidth < 250; // Adjust narrow threshold
+
+                                          return Wrap(
+                                            alignment: WrapAlignment.spaceBetween,
+                                            spacing: 8,
+                                            runSpacing: 4,
+                                            direction: isNarrow ? Axis.vertical : Axis.horizontal,
+                                            children: [
+                                              // Use the formattedDate here
+                                              Text("Test Date: $formattedDate", style: TextStyle(fontSize: 14)),
+                                              Text("Difficulty: $difficulty", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             );
-                          } else {
-                            // Handle error — lesson not found
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text("Lesson hash not found")),
-                            );
-                          }
-                        } catch (e) {
-                          // Handle request failure
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text("Failed to fetch lesson hash")),
-                          );
-                        }
-                      },
-
-                      child: Card(
-                        margin: EdgeInsets.symmetric(vertical: 8.0),
-                        elevation: 3,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12.0),
+                          }).toList(), // Convert the map result to a list of widgets
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                lessonNamehere,
-                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                              ),
-                              SizedBox(height: 8),
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  bool isNarrow = constraints.maxWidth < 300;
-
-                                  return Wrap(
-                                    alignment: WrapAlignment.spaceBetween,
-                                    spacing: 8,
-                                    runSpacing: 4,
-                                    direction: isNarrow ? Axis.vertical : Axis.horizontal,
-                                    children: [
-                                      Text("Test Date: $date", style: TextStyle(fontSize: 16)),
-                                      Text("Difficulty: $difficulty", style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                                    ],
-                                  );
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+                      ), // <<<< END MODIFIED: Closing Theme widget >>>>
                     );
                   },
                 ),
