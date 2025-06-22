@@ -1,14 +1,13 @@
 import json
 import os
-import requests
 import sys
+import requests
 import hashlib
 from pydantic import BaseModel, Field
 from typing import List
 import openai
 from getToken import receiveToken
 
-# Set your Fireworks API key
 #the key is in a sepparate script  under gitignore
 FIREWORKS_API_KEY = receiveToken("FW")
 
@@ -31,17 +30,14 @@ class QuestionList(BaseModel):
 def llm(text):
     user_prompt = f"""
 You are a question generator. Given a source text, generate 10 multiple-choice questions in strict JSON format.
-
 Each question must be an object like:
 {{
   "question": "...",
   "choices": ["Option A", "Option B", "Option C", "Option D"],
   "correct_answer": 0
 }}
-
 The first option from the choices array must be the correct answer; the other options should be plausible distractors.
 Only return a valid JSON object with a "questions" key containing an array of question objects. No extra explanation or formatting.
-
 Text:
 {text}
 """
