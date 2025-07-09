@@ -62,16 +62,10 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
   void initState() {
     super.initState();
     print("LessonCirclesPage: Initializing with hash: ${widget.hash}");
-    fetchLessonList();
+    _fetchLessonListAndUpdateState();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    fetchLessonList();
-  }
-
-  Future<void> fetchLessonList() async {
+  Future<void> _fetchLessonListAndUpdateState() async {
     setState(() {
       isLoading = true;
       hasError = false;
@@ -97,7 +91,12 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
           for (var item in data['lessons']) {
             if (item is Map<String, dynamic> && item.containsKey('lesson_number') && item.containsKey('percentage')) {
               final lessonNum = item['lesson_number'];
-              final percentage = item['percentage'];
+              // IMPORTANT: Ensure percentage is handled as a double.
+              // If backend sends integer 100, it might be decoded as int,
+              // so explicitly convert to double if necessary.
+              final percentage = (item['percentage'] is int)
+                  ? (item['percentage'] as int).toDouble()
+                  : item['percentage'] as double;
 
               if (lessonNum is int && percentage is double) {
                 tempOrderedNumbers.add(lessonNum);
@@ -110,13 +109,23 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
             }
           }
 
-          tempOrderedNumbers.sort();
+          tempOrderedNumbers.sort(); // Ensure lessons are sorted for sequential check
 
           setState(() {
             _orderedLessonNumbers = tempOrderedNumbers;
             _lessonData = tempLessonData;
             isLoading = false;
           });
+
+          // --- ADDED DEBUG PRINTS ---
+          print('--- DEBUGGING LESSON DATA (After setState) ---');
+          _lessonData.forEach((key, value) {
+            print('Lesson $key: Percentage $value% (Type: ${value.runtimeType})');
+          });
+          print('Is Lesson 0 completed (based on frontend logic)? ${_isLessonCompleted(0)}');
+          print('Is Lesson 1 completed (based on frontend logic)? ${_isLessonCompleted(1)}');
+          print('---------------------------------------------');
+          // --- END DEBUG PRINTS ---
 
         } else {
           setState(() {
@@ -144,8 +153,21 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
     }
   }
 
+  // Helper function to check if a lesson is considered "completed"
+  bool _isLessonCompleted(int lessonNumber) {
+    // Check if the lesson exists in our data and its percentage is 100.0 or very close
+    // Using a small epsilon for floating point comparison or just >= 100.0
+    return _lessonData.containsKey(lessonNumber) && _lessonData[lessonNumber] != null && _lessonData[lessonNumber]! >= 75.0;
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Determine if Lesson 0 is completed (needed for Lesson 1 unlock)
+    final bool isLesson0Completed = _isLessonCompleted(0);
+    // Determine if Lesson 1 is completed (needed for Lessons 2+ unlock)
+    final bool isLesson1Completed = _isLessonCompleted(1);
+
+
     return Scaffold(
       appBar: AppBar(title: Text('Lessons for ${widget.hash}')),
       body: isLoading
@@ -170,7 +192,7 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
                         ),
                         SizedBox(height: 20),
                         ElevatedButton(
-                          onPressed: fetchLessonList,
+                          onPressed: _fetchLessonListAndUpdateState,
                           child: Text("Retry"),
                         ),
                       ],
@@ -185,7 +207,7 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
                         textAlign: TextAlign.center,
                       ),
                     )
-                  : SingleChildScrollView( // <--- Wrap with SingleChildScrollView
+                  : SingleChildScrollView(
                       child: Center(
                         child: Padding(
                           padding: const EdgeInsets.all(16.0),
@@ -193,7 +215,40 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: _orderedLessonNumbers.map((lessonNumber) {
-                              final percentage = _lessonData[lessonNumber];
+                              final double? actualPercentage = _lessonData[lessonNumber];
+
+                              // --- Unlocking Logic ---
+                              bool isLessonAvailable;
+                              if (lessonNumber == 0) {
+                                isLessonAvailable = true; // Lesson 0 is always available
+                              } else if (lessonNumber == 1) {
+                                isLessonAvailable = isLesson0Completed; // Lesson 1 unlocks if Lesson 0 is 100%
+                              } else {
+                                // Lessons 2 and beyond unlock if Lesson 1 is 100%
+                                isLessonAvailable = isLesson1Completed;
+                              }
+
+                              // --- Percentage Display Logic ---
+                              String displayPercentageText = '';
+                              Color displayPercentageColor;
+
+                              if (actualPercentage != null) {
+                                if (lessonNumber == 0) {
+                                  // For Lesson 0, always display actual percentage
+                                  displayPercentageText = '${actualPercentage.toStringAsFixed(0)}%';
+                                } else {
+                                  // For other lessons, display 0% if < 50%, else actual
+                                  displayPercentageText = actualPercentage >= 50.0
+                                      ? '${actualPercentage.toStringAsFixed(0)}%'
+                                      : '0%';
+                                }
+                                displayPercentageColor = isLessonAvailable ? Colors.deepOrange : Colors.grey.shade600;
+                              } else {
+                                // If percentage is null (e.g., lesson not started), show 0%
+                                displayPercentageText = '0%';
+                                displayPercentageColor = isLessonAvailable ? Colors.deepOrange : Colors.grey.shade600;
+                              }
+
 
                               return Padding(
                                 padding: const EdgeInsets.symmetric(vertical: 8.0),
@@ -201,47 +256,44 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     GestureDetector(
-                                      onTap: () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => StartLesson(
-                                              lessonNumber: lessonNumber,
-                                              hash: widget.hash,
-                                            ),
-                                          ),
-                                        );
-                                      },
+                                      // Only allow tap if the lesson is available
+                                      onTap: isLessonAvailable
+                                          ? () async {
+                                              await Navigator.push(
+                                                context,
+                                                MaterialPageRoute(
+                                                  builder: (context) => StartLesson(
+                                                    lessonNumber: lessonNumber,
+                                                    hash: widget.hash,
+                                                  ),
+                                                ),
+                                              );
+                                              // After StartLesson finishes and pops, refresh the list
+                                              _fetchLessonListAndUpdateState();
+                                            }
+                                          : null, // Set onTap to null to disable interaction
                                       child: CircleAvatar(
                                         radius: 30,
-                                        backgroundColor: Colors.deepOrangeAccent,
+                                        backgroundColor: isLessonAvailable
+                                            ? Colors.deepOrangeAccent // Active color
+                                            : Colors.grey.shade400, // Greyed out for unavailable
                                         child: Text(
                                           '${lessonNumber + 1}',
                                           style: TextStyle(
-                                              color: Colors.white,
+                                              color: isLessonAvailable ? Colors.white : Colors.white70,
                                               fontSize: 18,
                                               fontWeight: FontWeight.bold),
                                         ),
                                       ),
                                     ),
                                     SizedBox(width: 10),
-                                    if (percentage != null)
-                                      Text(
-                                        '${percentage.toStringAsFixed(0)}%',
-                                        style: TextStyle(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.deepOrange),
-                                      )
-                                    else
-                                      SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          valueColor: AlwaysStoppedAnimation<Color>(Colors.deepOrange),
-                                        ),
-                                      ),
+                                    Text(
+                                      displayPercentageText,
+                                      style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          color: displayPercentageColor),
+                                    ),
                                   ],
                                 ),
                               );

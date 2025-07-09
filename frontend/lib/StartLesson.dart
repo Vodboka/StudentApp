@@ -49,11 +49,10 @@ class LessonService {
     }
   }
 
-  // New method to save updated question stats to the server
   Future<bool> saveQuestionStats(
       String hash,
       int lessonNumber,
-      int questionIndex,
+      int questionIndex, // This index corresponds to the question's original position in the lesson
       int numberOfTries,
       int numberOfCorrectTries) async {
     final uri = Uri.parse('$baseUrl/update_question_stats');
@@ -85,15 +84,16 @@ class LessonService {
 }
 
 class _StartLesson extends State<StartLesson> {
-  int currentQuestionIndex = 0;
+  int currentQuestionDisplayIndex = 0; // Index for the question currently being displayed
   int overallCorrectAnswers = 0;
   int? selectedAnswerIndex;
   bool isAnswerChecked = false;
   bool isLoading = true;
   bool quizCompleted = false;
 
-  List<Map<String, dynamic>> questions = [];
-  List<Map<String, dynamic>> incorrectQuestions = [];
+  List<Map<String, dynamic>> _allLessonQuestions = []; // Master list of all questions and their stats
+  List<int> _currentQuizQuestionIndices = []; // Indices of questions for the current quiz round
+  List<int> _incorrectQuestionIndicesForReview = []; // Indices of questions to review
 
   final LessonService _lessonService = LessonService(); // Instance of LessonService
 
@@ -113,17 +113,24 @@ class _StartLesson extends State<StartLesson> {
 
     if (fetchedQuestions != null) {
       setState(() {
-        questions = fetchedQuestions;
-        for (var q in questions) {
-          q['number_of_tries'] ??= 0;
-          q['number_of_correct_tries'] ??= 0;
+        _allLessonQuestions = fetchedQuestions.map((q) => Map<String, dynamic>.from(q)).toList();
+        // Initialize original_index and stats for all questions
+        for (int i = 0; i < _allLessonQuestions.length; i++) {
+          _allLessonQuestions[i]['original_index'] = i;
+          _allLessonQuestions[i]['number_of_tries'] ??= 0;
+          _allLessonQuestions[i]['number_of_correct_tries'] ??= 0;
         }
-        currentQuestionIndex = 0;
+
+        // Start the first round with all questions
+        _currentQuizQuestionIndices = List.generate(_allLessonQuestions.length, (index) => index);
+        _currentQuizQuestionIndices.shuffle(); // Shuffle for variety
+
+        currentQuestionDisplayIndex = 0;
         overallCorrectAnswers = 0;
         selectedAnswerIndex = null;
         isAnswerChecked = false;
         isLoading = false;
-        incorrectQuestions.clear();
+        _incorrectQuestionIndicesForReview.clear();
         quizCompleted = false;
       });
     } else {
@@ -139,7 +146,9 @@ class _StartLesson extends State<StartLesson> {
     setState(() {
       isAnswerChecked = true;
 
-      Map<String, dynamic> currentQuestion = questions[currentQuestionIndex];
+      // Get the actual question object from the master list using its current display index
+      final int originalIndex = _currentQuizQuestionIndices[currentQuestionDisplayIndex];
+      Map<String, dynamic> currentQuestion = _allLessonQuestions[originalIndex];
 
       currentQuestion['number_of_tries'] = (currentQuestion['number_of_tries'] ?? 0) + 1;
 
@@ -147,17 +156,9 @@ class _StartLesson extends State<StartLesson> {
         overallCorrectAnswers++;
         currentQuestion['number_of_correct_tries'] = (currentQuestion['number_of_correct_tries'] ?? 0) + 1;
       } else {
-        incorrectQuestions.add(currentQuestion);
+        // Only add the original_index of incorrect questions for later review
+        _incorrectQuestionIndicesForReview.add(originalIndex);
       }
-      
-      // Save the updated stats to the server immediately after validation
-      _lessonService.saveQuestionStats(
-        widget.hash,
-        widget.lessonNumber,
-        currentQuestionIndex, // Pass the index of the question in the current lesson's list
-        currentQuestion['number_of_tries'],
-        currentQuestion['number_of_correct_tries'],
-      );
     });
   }
 
@@ -167,23 +168,48 @@ class _StartLesson extends State<StartLesson> {
     setState(() {
       if (overallCorrectAnswers >= 15) {
         quizCompleted = true;
+        _saveAllQuestionStats(); // Save all stats when quiz is completed
         return;
       }
 
-      if (currentQuestionIndex < questions.length - 1) {
-        currentQuestionIndex++;
-      } else if (incorrectQuestions.isNotEmpty) {
-        questions = List.from(incorrectQuestions);
-        incorrectQuestions.clear();
-        currentQuestionIndex = 0;
+      // Check if there are more questions in the current quiz round
+      if (currentQuestionDisplayIndex < _currentQuizQuestionIndices.length - 1) {
+        currentQuestionDisplayIndex++;
+      } else if (_incorrectQuestionIndicesForReview.isNotEmpty) {
+        // If current round is finished and there are incorrect questions, start a review round
+        _currentQuizQuestionIndices = List.from(_incorrectQuestionIndicesForReview);
+        _currentQuizQuestionIndices.shuffle(); // Shuffle review questions too
+        _incorrectQuestionIndicesForReview.clear(); // Clear for next review round
+        currentQuestionDisplayIndex = 0;
       } else {
+        // All questions answered, no more incorrect ones
         quizCompleted = true;
+        _saveAllQuestionStats(); // Save all stats when quiz is completed
         return;
       }
 
       selectedAnswerIndex = null;
       isAnswerChecked = false;
     });
+  }
+
+  void _saveAllQuestionStats() async {
+    // Iterate over the master list of all questions to save their final stats
+    for (final question in _allLessonQuestions) {
+      final originalIndex = question['original_index'];
+      if (originalIndex is int) {
+        await _lessonService.saveQuestionStats(
+          widget.hash,
+          widget.lessonNumber,
+          originalIndex,
+          question['number_of_tries'],
+          question['number_of_correct_tries'],
+        );
+      } else {
+        print('Error: Question missing original_index or it\'s not an int: $question');
+      }
+    }
+    print("All question stats saved for lesson ${widget.lessonNumber + 1}.");
   }
 
   @override
@@ -195,7 +221,7 @@ class _StartLesson extends State<StartLesson> {
       );
     }
 
-    if (questions.isEmpty) {
+    if (_allLessonQuestions.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),
         body: Center(child: Text("No questions available")),
@@ -215,11 +241,14 @@ class _StartLesson extends State<StartLesson> {
       );
     }
 
-    Map<String, dynamic> currentQuestion = questions[currentQuestionIndex];
+    // Get the current question to display from the master list using the current display index
+    final int questionIndexToShow = _currentQuizQuestionIndices[currentQuestionDisplayIndex];
+    Map<String, dynamic> currentQuestion = _allLessonQuestions[questionIndexToShow];
+
     int currentQuestionTries = currentQuestion['number_of_tries'] ?? 0;
     int currentQuestionCorrectTries = currentQuestion['number_of_correct_tries'] ?? 0;
 
-    double progress = (currentQuestionIndex + 1) / questions.length;
+    double progress = (currentQuestionDisplayIndex + 1) / _currentQuizQuestionIndices.length;
 
     return Scaffold(
       appBar: AppBar(title: Text("Lesson ${widget.lessonNumber + 1}")),

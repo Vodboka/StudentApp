@@ -573,7 +573,7 @@ def update_question_stats():
     lesson_number = data.get('lesson_number')
     question_index = data.get('question_index')
     number_of_tries = data.get('number_of_tries')
-    number_of_correct_tries = data.get('numbexr_of_correct_tries')
+    number_of_correct_tries = data.get('number_of_correct_tries')
 
     if not all([hash_value, lesson_number is not None, question_index is not None,
                 number_of_tries is not None, number_of_correct_tries is not None]):
