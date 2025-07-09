@@ -91,9 +91,6 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
           for (var item in data['lessons']) {
             if (item is Map<String, dynamic> && item.containsKey('lesson_number') && item.containsKey('percentage')) {
               final lessonNum = item['lesson_number'];
-              // IMPORTANT: Ensure percentage is handled as a double.
-              // If backend sends integer 100, it might be decoded as int,
-              // so explicitly convert to double if necessary.
               final percentage = (item['percentage'] is int)
                   ? (item['percentage'] as int).toDouble()
                   : item['percentage'] as double;
@@ -109,7 +106,7 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
             }
           }
 
-          tempOrderedNumbers.sort(); // Ensure lessons are sorted for sequential check
+          tempOrderedNumbers.sort(); // Ensure lessons are sorted
 
           setState(() {
             _orderedLessonNumbers = tempOrderedNumbers;
@@ -117,15 +114,14 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
             isLoading = false;
           });
 
-          // --- ADDED DEBUG PRINTS ---
           print('--- DEBUGGING LESSON DATA (After setState) ---');
           _lessonData.forEach((key, value) {
             print('Lesson $key: Percentage $value% (Type: ${value.runtimeType})');
           });
-          print('Is Lesson 0 completed (based on frontend logic)? ${_isLessonCompleted(0)}');
-          print('Is Lesson 1 completed (based on frontend logic)? ${_isLessonCompleted(1)}');
+          print('Is Lesson 0 started? ${_isLessonStarted(0)}');
+          print('Is Lesson 0 completed (for unlock logic)? ${_isLessonCompleted(0)}');
+          print('Is Lesson 1 completed (for unlock logic)? ${_isLessonCompleted(1)}');
           print('---------------------------------------------');
-          // --- END DEBUG PRINTS ---
 
         } else {
           setState(() {
@@ -153,17 +149,23 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
     }
   }
 
-  // Helper function to check if a lesson is considered "completed"
+  // Helper function to check if a lesson has started (percentage > 0.0)
+  bool _isLessonStarted(int lessonNumber) {
+    return _lessonData.containsKey(lessonNumber) && _lessonData[lessonNumber] != null && _lessonData[lessonNumber]! > 0.0;
+  }
+
+  // Helper function to check if a lesson is considered "completed" (percentage >= 50.0 for unlocking)
   bool _isLessonCompleted(int lessonNumber) {
-    // Check if the lesson exists in our data and its percentage is 100.0 or very close
-    // Using a small epsilon for floating point comparison or just >= 100.0
-    return _lessonData.containsKey(lessonNumber) && _lessonData[lessonNumber] != null && _lessonData[lessonNumber]! >= 75.0;
+    return _lessonData.containsKey(lessonNumber) && _lessonData[lessonNumber] != null && _lessonData[lessonNumber]! >= 50.0;
   }
 
   @override
   Widget build(BuildContext context) {
     // Determine if Lesson 0 is completed (needed for Lesson 1 unlock)
-    final bool isLesson0Completed = _isLessonCompleted(0);
+    final bool isLesson0CompletedForUnlock = _isLessonCompleted(0);
+    // Determine if Lesson 0 has been started (percentage > 0.0)
+    final bool isLesson0Started = _isLessonStarted(0);
+
     // Determine if Lesson 1 is completed (needed for Lessons 2+ unlock)
     final bool isLesson1Completed = _isLessonCompleted(1);
 
@@ -199,12 +201,26 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
                     ),
                   ),
                 )
-              : _orderedLessonNumbers.isEmpty
+              : _orderedLessonNumbers.isEmpty && !isLesson0Started // No lessons fetched and Lesson 0 hasn't started
                   ? Center(
-                      child: Text(
-                        "No lessons found for this hash. Please add lessons or check the hash.",
-                        style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                        textAlign: TextAlign.center,
+                      // This case might happen if get_lessons_for_hash returns an empty list
+                      // before lesson0.json is created, or if it errors out.
+                      // We still need to show Lesson 0, even if not explicitly in _orderedLessonNumbers yet.
+                      // If _orderedLessonNumbers is empty, it implies lesson0 hasn't been recognized yet,
+                      // so we'll simulate its presence for the initial state.
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildLessonCircle(
+                            lessonNumber: 0,
+                            actualPercentage: _lessonData.containsKey(0) ? _lessonData[0]! : 0.0,
+                            isLessonAvailable: true,
+                            isQuestionMark: false,
+                          ),
+                          SizedBox(height: 20),
+                          // Display the gray question mark circle if Lesson 0 hasn't started
+                          _buildQuestionMarkCircle(),
+                        ],
                       ),
                     )
                   : SingleChildScrollView(
@@ -214,94 +230,159 @@ class _LessonCirclesPageState extends State<LessonCirclesPage> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.center,
-                            children: _orderedLessonNumbers.map((lessonNumber) {
-                              final double? actualPercentage = _lessonData[lessonNumber];
+                            children: [
+                              // Always render Lesson 0
+                              _buildLessonCircle(
+                                lessonNumber: 0,
+                                actualPercentage: _lessonData.containsKey(0) ? _lessonData[0]! : 0.0,
+                                isLessonAvailable: true,
+                                isQuestionMark: false,
+                              ),
+                              SizedBox(height: 10), // Spacing between lesson 0 and others/placeholder
+                              // Conditional rendering for subsequent lessons or placeholder
+                              if (!isLesson0Started)
+                                // If Lesson 0 hasn't started (percentage 0.0), show only the question mark placeholder
+                                _buildQuestionMarkCircle()
+                              else
+                                // If Lesson 0 has started, display all other lessons
+                                ..._orderedLessonNumbers.where((ln) => ln != 0).map((lessonNumber) {
+                                  final double? actualPercentage = _lessonData[lessonNumber];
 
-                              // --- Unlocking Logic ---
-                              bool isLessonAvailable;
-                              if (lessonNumber == 0) {
-                                isLessonAvailable = true; // Lesson 0 is always available
-                              } else if (lessonNumber == 1) {
-                                isLessonAvailable = isLesson0Completed; // Lesson 1 unlocks if Lesson 0 is 100%
-                              } else {
-                                // Lessons 2 and beyond unlock if Lesson 1 is 100%
-                                isLessonAvailable = isLesson1Completed;
-                              }
+                                  // --- Unlocking Logic ---
+                                  bool isLessonAvailable;
+                                  if (lessonNumber == 1) {
+                                    isLessonAvailable = isLesson0CompletedForUnlock; // Lesson 1 unlocks if Lesson 0 is >= 50%
+                                  } else {
+                                    // Lessons 2 and beyond unlock if Lesson 1 is >= 50%
+                                    isLessonAvailable = isLesson1Completed;
+                                  }
 
-                              // --- Percentage Display Logic ---
-                              String displayPercentageText = '';
-                              Color displayPercentageColor;
+                                  // --- Percentage Display Logic ---
+                                  String displayPercentageText = '';
+                                  Color displayPercentageColor;
 
-                              if (actualPercentage != null) {
-                                if (lessonNumber == 0) {
-                                  // For Lesson 0, always display actual percentage
-                                  displayPercentageText = '${actualPercentage.toStringAsFixed(0)}%';
-                                } else {
-                                  // For other lessons, display 0% if < 50%, else actual
-                                  displayPercentageText = actualPercentage >= 50.0
-                                      ? '${actualPercentage.toStringAsFixed(0)}%'
-                                      : '0%';
-                                }
-                                displayPercentageColor = isLessonAvailable ? Colors.deepOrange : Colors.grey.shade600;
-                              } else {
-                                // If percentage is null (e.g., lesson not started), show 0%
-                                displayPercentageText = '0%';
-                                displayPercentageColor = isLessonAvailable ? Colors.deepOrange : Colors.grey.shade600;
-                              }
+                                  if (actualPercentage != null) {
+                                      displayPercentageText = actualPercentage >= 50.0
+                                          ? '${actualPercentage.toStringAsFixed(0)}%'
+                                          : '0%';
+                                    displayPercentageColor = isLessonAvailable ? Colors.deepOrange : Colors.grey.shade600;
+                                  } else {
+                                    // If percentage is null (e.g., lesson not started), show 0%
+                                    displayPercentageText = '0%';
+                                    displayPercentageColor = isLessonAvailable ? Colors.deepOrange : Colors.grey.shade600;
+                                  }
 
-
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    GestureDetector(
-                                      // Only allow tap if the lesson is available
-                                      onTap: isLessonAvailable
-                                          ? () async {
-                                              await Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (context) => StartLesson(
-                                                    lessonNumber: lessonNumber,
-                                                    hash: widget.hash,
-                                                  ),
-                                                ),
-                                              );
-                                              // After StartLesson finishes and pops, refresh the list
-                                              _fetchLessonListAndUpdateState();
-                                            }
-                                          : null, // Set onTap to null to disable interaction
-                                      child: CircleAvatar(
-                                        radius: 30,
-                                        backgroundColor: isLessonAvailable
-                                            ? Colors.deepOrangeAccent // Active color
-                                            : Colors.grey.shade400, // Greyed out for unavailable
-                                        child: Text(
-                                          '${lessonNumber + 1}',
-                                          style: TextStyle(
-                                              color: isLessonAvailable ? Colors.white : Colors.white70,
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                    ),
-                                    SizedBox(width: 10),
-                                    Text(
-                                      displayPercentageText,
-                                      style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: displayPercentageColor),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
+                                  return _buildLessonCircle(
+                                    lessonNumber: lessonNumber,
+                                    actualPercentage: actualPercentage ?? 0.0,
+                                    isLessonAvailable: isLessonAvailable,
+                                    displayPercentageText: displayPercentageText,
+                                    displayPercentageColor: displayPercentageColor,
+                                  );
+                                }).toList(),
+                            ],
                           ),
                         ),
                       ),
                     ),
+    );
+  }
+
+  // Helper method to build a single lesson circle widget
+  Widget _buildLessonCircle({
+    required int lessonNumber,
+    required double actualPercentage,
+    required bool isLessonAvailable,
+    bool isQuestionMark = false, // Added for the question mark circle
+    String? displayPercentageText, // Optional override for percentage text
+    Color? displayPercentageColor, // Optional override for percentage color
+  }) {
+    String textToDisplay;
+    Color circleColor;
+    Color textColor;
+    IconData? icon;
+
+    if (isQuestionMark) {
+      textToDisplay = ''; // No number for question mark circle
+      circleColor = Colors.grey.shade400;
+      textColor = Colors.white70;
+      icon = Icons.help_outline; // Question mark icon
+      displayPercentageText = ''; // No percentage for question mark
+    } else {
+      textToDisplay = '${lessonNumber + 1}';
+      circleColor = isLessonAvailable ? Colors.deepOrangeAccent : Colors.grey.shade400;
+      textColor = isLessonAvailable ? Colors.white : Colors.white70;
+
+      // Default percentage display if not overridden
+      if (displayPercentageText == null) {
+         // Special handling for Lesson 0 always showing its actual percentage
+        if (lessonNumber == 0) {
+          displayPercentageText = '${actualPercentage.toStringAsFixed(0)}%';
+        } else {
+          // For other lessons, show 0% if actual percentage is less than 50, otherwise show actual
+          displayPercentageText = actualPercentage >= 50.0 ? '${actualPercentage.toStringAsFixed(0)}%' : '0%';
+        }
+      }
+      if (displayPercentageColor == null) {
+        displayPercentageColor = isLessonAvailable ? Colors.deepOrange : Colors.grey.shade600;
+      }
+    }
+
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          GestureDetector(
+            onTap: isLessonAvailable && !isQuestionMark
+                ? () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => StartLesson(
+                          lessonNumber: lessonNumber,
+                          hash: widget.hash,
+                        ),
+                      ),
+                    );
+                    _fetchLessonListAndUpdateState();
+                  }
+                : null,
+            child: CircleAvatar(
+              radius: 30,
+              backgroundColor: circleColor,
+              child: icon != null
+                  ? Icon(icon, color: textColor, size: 30) // Display icon if available
+                  : Text(
+                      textToDisplay,
+                      style: TextStyle(
+                          color: textColor,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold),
+                    ),
+            ),
+          ),
+          SizedBox(width: 10),
+          Text(
+            displayPercentageText ?? '', // Use the overridden text or default to empty
+            style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: displayPercentageColor),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // New helper method for the gray question mark circle
+  Widget _buildQuestionMarkCircle() {
+    return _buildLessonCircle(
+      lessonNumber: -1, // Use a dummy lesson number not used by actual lessons
+      actualPercentage: 0.0,
+      isLessonAvailable: false, // It's not "available" to tap for a lesson
+      isQuestionMark: true,
     );
   }
 }

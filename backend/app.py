@@ -7,8 +7,9 @@ import re
 from collections import Counter
 import subprocess
 import sys
+import random
 
-app = Flask(__name__)
+app = Flask(__name__) # Reverted to standard Flask initialization
 
 RES_FOLDER = "res"
 UPLOAD_FOLDER = os.path.join(RES_FOLDER, "uploads")
@@ -244,30 +245,226 @@ def add_subject():
         save_subjects(subjects)
     return jsonify({'message': f'Subject "{subject}" added'}), 200
 
+# Helper function to calculate user difficulty for a single question
+def calculate_user_difficulty_score(question):
+    num_tries = question.get('number_of_tries', 0)
+    num_correct_tries = question.get('number_of_correct_tries', 0)
+
+    if num_tries == 0:
+        # If no tries, assume neutral user difficulty (e.g., 0.5 for a 0-1 scale)
+        return 0.5 
+    
+    # Calculate error rate as a proxy for user difficulty (higher error rate = higher difficulty for user)
+    error_rate = 1 - (num_correct_tries / num_tries)
+    return error_rate
+
+# This is the new function to be called after Lesson 0 completion
+@app.route('/finalize_initial_lesson', methods=['POST'])
+def finalize_initial_lesson():
+    data = request.get_json()
+    hash_value = data.get('hash')
+
+    if not hash_value:
+        return jsonify({'error': 'Hash value is required'}), 400
+
+    LESSON_DIRECTORY = os.path.join(LESSONS_RECORD, hash_value)
+    os.makedirs(LESSON_DIRECTORY, exist_ok=True) # Ensure directory exists
+
+    # Load all questions originally processed
+    all_original_questions = load_questions(hash_value + ".json")
+
+    # Load questions specifically from lesson0.json, which have been 'evaluated'
+    lesson0_questions_from_file = load_questions_from_lesson_chunk(hash_value, 0)
+    
+    lesson0_question_texts = {q.get('question') for q in lesson0_questions_from_file if q.get('question')}
+
+    remaining_questions_for_chunks = []
+    for q in all_original_questions:
+        # Re-initialize stats if they are being processed again for a new path
+        q['number_of_tries'] = q.get('number_of_tries', 0)
+        q['number_of_correct_tries'] = q.get('number_of_correct_tries', 0)
+        q['user_difficulty'] = calculate_user_difficulty_score(q) # Calculate user difficulty here
+
+        # Exclude questions that were part of lesson0.json
+        if q.get('question') not in lesson0_question_texts:
+            remaining_questions_for_chunks.append(q)
+
+    # --- New Combined Difficulty Sorting Logic ---
+    for q in remaining_questions_for_chunks:
+        objective_difficulty_percentage = q.get('difficulty_percentage', 50) # 0-100 scale
+        user_difficulty_score = q.get('user_difficulty', 0.5) # 0-1 scale (0=easy for user, 1=hard for user)
+
+        # Normalize objective difficulty to a 0-1 scale for consistent weighting
+        normalized_objective_difficulty = objective_difficulty_percentage / 100.0
+
+        # Define weights based on objective difficulty categories
+        # These weights apply to the *user_difficulty_score* component
+        if objective_difficulty_percentage <= 33: # Easy objective
+            user_weight = 0.125
+        elif 34 <= objective_difficulty_percentage <= 66: # Medium objective
+            user_weight = 0.375
+        else: # Hard objective
+            user_weight = 0.5
+
+        # You need to decide on the overall weighting between objective and user difficulty.
+        # Here, I'm proposing a 50/50 split initially.
+        # This means:
+        # 0.5 * normalized_objective_difficulty (0-1)
+        # + 0.5 * (user_difficulty_score * user_weight * 2)  -- *2 to scale user_weight back to a 0-1 contribution
+        # Let's adjust this to make more sense:
+        # Let's use a "combined_difficulty" score that also ranges from 0-100 (like difficulty_percentage)
+        
+        # Scale user_difficulty_score (0-1) to influence by its weight
+        # A simple way: user_difficulty_score (0-1) * user_weight (e.g., 0.125) gives a tiny value.
+        # Let's think about how to combine them to make sense in a 0-100 scale for sorting.
+        # A higher combined score means harder.
+
+        # Proposed Combination:
+        # User difficulty's influence is based on how "badly" they did on similar questions,
+        # but modulated by the *objective* difficulty category.
+        # A higher `user_difficulty_score` (error rate) means the question was harder for them.
+
+        # Let's aim for a combined score where objective is the baseline, and user performance
+        # shifts it up (if hard for user) or down (if easy for user).
+        
+        # User difficulty contribution: This should be higher if the user struggled (user_difficulty_score is high)
+        # and more so if the question was objectively hard (higher user_weight).
+        user_contribution = user_difficulty_score * user_weight * 100 # Scales to 0-50 effectively if user_weight max is 0.5
+
+        # Combined score: Simple weighted average where user_contribution adds to objective.
+        # Adjust weight_objective and weight_user as needed.
+        weight_objective = 0.5
+        weight_user = 0.5 # This 0.5 is for the *overall* user impact, not the internal user_weight.
+
+        # Let's try a different calculation for combined_difficulty_score (0-100)
+        # combined_difficulty = (objective_difficulty_percentage * overall_objective_weight) + (user_difficulty_score * user_category_weight * some_scaling_factor_to_reach_100)
+        
+        # A more intuitive approach:
+        # Baseline is objective difficulty.
+        # If user_difficulty_score is high (they struggled), increase the effective difficulty.
+        # If user_difficulty_score is low (they found it easy), decrease the effective difficulty.
+        
+        # Let's say user_difficulty_score (0-1, error rate)
+        # If user_difficulty_score is 0.5 (average), no change.
+        # If user_difficulty_score is 1 (always wrong), max increase.
+        # If user_difficulty_score is 0 (always correct), max decrease.
+
+        # `user_influence_factor` ranges from -1 to 1 (easy to hard relative to average performance)
+        user_influence_factor = (user_difficulty_score - 0.5) * 2 # -1 to 1
+
+        # Adjust the user_influence_factor by the user_weight (0.125, 0.375, 0.5)
+        # This means user struggle on hard questions has a bigger impact on score
+        weighted_user_influence = user_influence_factor * user_weight
+
+        # Combine with objective difficulty.
+        # We want this combined score to still be somewhat representative of a 0-100 scale.
+        # Let's say we allow user performance to shift the objective difficulty by up to +/- 20 points
+        # For example, if weighted_user_influence is 0.5, that could be a +10 point shift.
+        max_shift = 20 # Max points user performance can shift the objective difficulty
+
+        # Calculate the actual shift
+        difficulty_shift = weighted_user_influence * max_shift * 2 # Multiply by 2 because weighted_user_influence is roughly -0.5 to 0.5
+
+        combined_difficulty_score = objective_difficulty_percentage + difficulty_shift
+
+        # Ensure the score stays within reasonable bounds (e.g., 0 to 100)
+        combined_difficulty_score = max(0, min(100, combined_difficulty_score))
+
+        q['combined_difficulty_score'] = combined_difficulty_score
+        print(f"DEBUG: Question: '{q.get('question', 'N/A')[:50]}...', Obj Difficulty: {objective_difficulty_percentage:.2f}, User Difficulty Score: {user_difficulty_score:.2f}, Combined Difficulty Score: {combined_difficulty_score:.2f}", file=sys.stderr)
+
+    # Sort the remaining questions by the new combined difficulty score
+    remaining_questions_for_chunks.sort(key=lambda q: q.get('combined_difficulty_score', 0))
+
+    # Re-chunk the remaining questions starting from lesson1.json
+    questions_per_lesson = 15
+    total_remaining_questions = len(remaining_questions_for_chunks)
+    
+    current_lesson_number = 1 # Start numbering from lesson1.json
+
+    # Remove any existing lesson files (lesson1.json, lesson2.json, etc.)
+    # to ensure clean re-generation, but preserve lesson0.json
+    for f_name in os.listdir(LESSON_DIRECTORY):
+        if f_name.startswith('lesson') and f_name.endswith('.json') and f_name != 'lesson0.json':
+            os.remove(os.path.join(LESSON_DIRECTORY, f_name))
+            print(f"Removed old lesson file: {f_name}", file=sys.stderr)
+
+    full_chunks_remaining = total_remaining_questions // questions_per_lesson
+
+    for i in range(full_chunks_remaining):
+        start = i * questions_per_lesson
+        end = start + questions_per_lesson
+        LESSON_FILE_PATH = os.path.join(LESSON_DIRECTORY, f"lesson{current_lesson_number}.json")
+        save_questions_to_lesson_chunk(hash_value, current_lesson_number, remaining_questions_for_chunks[start:end])
+        current_lesson_number += 1
+
+    leftover = total_remaining_questions % questions_per_lesson
+    if leftover:
+        LESSON_FILE_PATH = os.path.join(LESSON_DIRECTORY, f"lesson{current_lesson_number}.json")
+        save_questions_to_lesson_chunk(hash_value, current_lesson_number, remaining_questions_for_chunks[-leftover:])
+
+    return jsonify({'message': 'Lessons re-organized successfully after initial test.'}), 200
+
+# Modified make_lesson_path to ONLY create lesson0 initially
 def make_lesson_path(hashProcessed):
     LESSON_DIRECTORY = os.path.join(LESSONS_RECORD, hashProcessed)
     os.makedirs(LESSON_DIRECTORY, exist_ok=True)
     
-    questions = load_questions(hashProcessed + ".json")
+    all_questions = load_questions(hashProcessed + ".json")
 
-    for question in questions:
+    for question in all_questions:
         question['number_of_tries'] = question.get('number_of_tries', 0)
         question['number_of_correct_tries'] = question.get('number_of_correct_tries', 0)
+        question['user_difficulty'] = question.get('user_difficulty', 0) # Initialize or keep existing
 
-    total_questions = len(questions)
-    questions_per_lesson = 15
-    full_chunks = total_questions // questions_per_lesson
+    # Categorize all questions by difficulty for lesson0 balancing
+    easy_questions = []
+    medium_questions = []
+    hard_questions = []
 
-    for i in range(full_chunks):
-        start = i * questions_per_lesson
-        end = start + questions_per_lesson
-        LESSON_FILE_PATH = os.path.join(LESSON_DIRECTORY, f"lesson{i}.json")
-        save_questions_in_lessons(questions[start:end], LESSON_FILE_PATH)
+    for q in all_questions:
+        difficulty = q.get('difficulty_percentage', 50)
+        if difficulty <= 33:
+            easy_questions.append(q)
+        elif 34 <= difficulty <= 66:
+            medium_questions.append(q)
+        else:
+            hard_questions.append(q)
 
-    leftover = total_questions % questions_per_lesson
-    if leftover:
-        LESSON_FILE_PATH = os.path.join(LESSON_DIRECTORY, f"lesson{full_chunks}.json")
-        save_questions_in_lessons(questions[-leftover:], LESSON_FILE_PATH)
+    random.shuffle(easy_questions)
+    random.shuffle(medium_questions)
+    random.shuffle(hard_questions)
+
+    lesson_0_questions = []
+    lesson_0_size = 15
+    
+    target_easy_in_l0 = 5
+    target_medium_in_l0 = 5
+    target_hard_in_l0 = 5
+
+    # Try to pick target number from each category
+    lesson_0_questions.extend(easy_questions[:min(target_easy_in_l0, len(easy_questions))])
+    easy_questions = easy_questions[min(target_easy_in_l0, len(easy_questions)):]
+
+    lesson_0_questions.extend(medium_questions[:min(target_medium_in_l0, len(medium_questions))])
+    medium_questions = medium_questions[min(target_medium_in_l0, len(medium_questions)):]
+
+    lesson_0_questions.extend(hard_questions[:min(target_hard_in_l0, len(hard_questions))])
+    hard_questions = hard_questions[min(target_hard_in_l0, len(hard_questions)):]
+
+    # Fill any remaining slots for Lesson 0
+    remaining_pool_for_l0 = easy_questions + medium_questions + hard_questions
+    random.shuffle(remaining_pool_for_l0)
+
+    while len(lesson_0_questions) < lesson_0_size and remaining_pool_for_l0:
+        lesson_0_questions.append(remaining_pool_for_l0.pop(0))
+
+    # Save Lesson 0
+    LESSON_0_FILE_PATH = os.path.join(LESSON_DIRECTORY, "lesson0.json")
+    save_questions_in_lessons(lesson_0_questions, LESSON_0_FILE_PATH)
+
+    # Initial generation will only create lesson0.
+    # The rest will be handled by finalize_initial_lesson later.
 
 
 @app.route('/add_lesson', methods=['POST'])
@@ -298,7 +495,7 @@ def add_lesson():
     try:
         print(f"[INFO][Flask] Attempting to run fireReq.py for {text_identifier}...", file=sys.stderr)
         result_fire_req = subprocess.run(
-            ['python3', 'fireReq.py', text_identifier],
+            ['python3', 'fireReqObj.py', text_identifier],
             capture_output=True,
             text=True,
             check=True
@@ -384,7 +581,7 @@ def add_lesson():
     })
     save_lessons(lessons)
 
-    make_lesson_path(processed_filename)
+    make_lesson_path(processed_filename) # This will now only create lesson0.json initially
 
     return jsonify({
         'message': f'Lesson \"{data['lesson_name']}\" added successfully under subject \"{subject}\"',
@@ -397,8 +594,6 @@ def add_lesson():
             'processed filename': processed_filename
         }
     }), 201
-
-
 
 
 @app.route('/get_lessons', methods=['GET'])
@@ -434,7 +629,7 @@ def get_lessons_for_hash():
         f for f in os.listdir(lesson_dir) if f.startswith('lesson') and f.endswith('.json')
     ])
     
-    lessons_with_percentages = [] # List to store dicts of {lesson_number, percentage}
+    lessons_with_percentages = []
 
     for f in lesson_files:
         try:
@@ -446,7 +641,6 @@ def get_lessons_for_hash():
                 with open(lesson_file_path, "r", encoding="utf-8") as lf:
                     questions_data = json.load(lf)
 
-            # Calculate average percentage for this lesson
             sum_of_individual_rates = 0.0
             number_of_questions_with_attempts = 0
 
@@ -461,9 +655,8 @@ def get_lessons_for_hash():
             average_percentage = 0.0
             if number_of_questions_with_attempts > 0:
                 average_percentage = (sum_of_individual_rates / number_of_questions_with_attempts) * 100
-            elif questions_data: # If there are questions but none attempted
+            elif questions_data:
                  average_percentage = 0.0
-            # If questions_data is empty, average_percentage remains 0.0 (initialized)
 
             lessons_with_percentages.append({
                 'lesson_number': lesson_number,
@@ -477,7 +670,6 @@ def get_lessons_for_hash():
             print(f"[ERROR] Error processing lesson file {f}: {e}", file=sys.stderr)
             continue
 
-    # Sort the list by lesson_number before returning
     lessons_with_percentages.sort(key=lambda x: x['lesson_number'])
 
     return jsonify({'lessons': lessons_with_percentages})
@@ -591,9 +783,12 @@ def update_question_stats():
             question_to_update['number_of_tries'] = number_of_tries
             question_to_update['number_of_correct_tries'] = number_of_correct_tries
             
+            # Recalculate user_difficulty for this specific question when its stats are updated
+            question_to_update['user_difficulty'] = calculate_user_difficulty_score(question_to_update)
+
             save_questions_to_lesson_chunk(hash_value, lesson_number, lesson_questions)
             
-            print(f"[INFO][Flask] Updated stats for question {question_index} in lesson {lesson_number} (hash: {hash_value}): Tries={number_of_tries}, Correct={number_of_correct_tries}", file=sys.stderr)
+            print(f"[INFO][Flask] Updated stats for question {question_index} in lesson {lesson_number} (hash: {hash_value}): Tries={number_of_tries}, Correct={number_of_correct_tries}, User Difficulty Score (Recalc)={question_to_update['user_difficulty']:.2f}", file=sys.stderr)
             return jsonify({'message': 'Question stats updated successfully'}), 200
         else:
             print(f"[ERROR][Flask] /update_question_stats: Invalid question_index: {question_index} for lesson {lesson_number} (hash: {hash_value})", file=sys.stderr)

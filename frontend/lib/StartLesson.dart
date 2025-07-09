@@ -81,6 +81,31 @@ class LessonService {
       return false;
     }
   }
+
+  // NEW: Function to trigger backend to finalize lesson organization
+  Future<bool> finalizeInitialLessonOrganization(String hash) async {
+    final uri = Uri.parse('$baseUrl/finalize_initial_lesson');
+    try {
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'hash': hash,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        print('Backend successfully finalized initial lesson organization.');
+        return true;
+      } else {
+        print('Failed to finalize initial lesson organization: ${response.body}');
+        return false;
+      }
+    } catch (e) {
+      print('Network error finalizing initial lesson organization: $e');
+      return false;
+    }
+  }
 }
 
 class _StartLesson extends State<StartLesson> {
@@ -114,16 +139,14 @@ class _StartLesson extends State<StartLesson> {
     if (fetchedQuestions != null) {
       setState(() {
         _allLessonQuestions = fetchedQuestions.map((q) => Map<String, dynamic>.from(q)).toList();
-        // Initialize original_index and stats for all questions
         for (int i = 0; i < _allLessonQuestions.length; i++) {
           _allLessonQuestions[i]['original_index'] = i;
           _allLessonQuestions[i]['number_of_tries'] ??= 0;
           _allLessonQuestions[i]['number_of_correct_tries'] ??= 0;
         }
 
-        // Start the first round with all questions
         _currentQuizQuestionIndices = List.generate(_allLessonQuestions.length, (index) => index);
-        _currentQuizQuestionIndices.shuffle(); // Shuffle for variety
+        _currentQuizQuestionIndices.shuffle();
 
         currentQuestionDisplayIndex = 0;
         overallCorrectAnswers = 0;
@@ -146,7 +169,6 @@ class _StartLesson extends State<StartLesson> {
     setState(() {
       isAnswerChecked = true;
 
-      // Get the actual question object from the master list using its current display index
       final int originalIndex = _currentQuizQuestionIndices[currentQuestionDisplayIndex];
       Map<String, dynamic> currentQuestion = _allLessonQuestions[originalIndex];
 
@@ -156,7 +178,6 @@ class _StartLesson extends State<StartLesson> {
         overallCorrectAnswers++;
         currentQuestion['number_of_correct_tries'] = (currentQuestion['number_of_correct_tries'] ?? 0) + 1;
       } else {
-        // Only add the original_index of incorrect questions for later review
         _incorrectQuestionIndicesForReview.add(originalIndex);
       }
     });
@@ -168,23 +189,20 @@ class _StartLesson extends State<StartLesson> {
     setState(() {
       if (overallCorrectAnswers >= 15) {
         quizCompleted = true;
-        _saveAllQuestionStats(); // Save all stats when quiz is completed
+        _saveAllQuestionStats();
         return;
       }
 
-      // Check if there are more questions in the current quiz round
       if (currentQuestionDisplayIndex < _currentQuizQuestionIndices.length - 1) {
         currentQuestionDisplayIndex++;
       } else if (_incorrectQuestionIndicesForReview.isNotEmpty) {
-        // If current round is finished and there are incorrect questions, start a review round
         _currentQuizQuestionIndices = List.from(_incorrectQuestionIndicesForReview);
-        _currentQuizQuestionIndices.shuffle(); // Shuffle review questions too
-        _incorrectQuestionIndicesForReview.clear(); // Clear for next review round
+        _currentQuizQuestionIndices.shuffle();
+        _incorrectQuestionIndicesForReview.clear();
         currentQuestionDisplayIndex = 0;
       } else {
-        // All questions answered, no more incorrect ones
         quizCompleted = true;
-        _saveAllQuestionStats(); // Save all stats when quiz is completed
+        _saveAllQuestionStats();
         return;
       }
 
@@ -194,7 +212,6 @@ class _StartLesson extends State<StartLesson> {
   }
 
   void _saveAllQuestionStats() async {
-    // Iterate over the master list of all questions to save their final stats
     for (final question in _allLessonQuestions) {
       final originalIndex = question['original_index'];
       if (originalIndex is int) {
@@ -210,6 +227,12 @@ class _StartLesson extends State<StartLesson> {
       }
     }
     print("All question stats saved for lesson ${widget.lessonNumber + 1}.");
+
+    // NEW: If this is Lesson 0, trigger the backend to re-organize subsequent lessons
+    if (widget.lessonNumber == 0) {
+      print("Lesson 0 completed. Triggering backend to finalize lesson organization...");
+      await _lessonService.finalizeInitialLessonOrganization(widget.hash);
+    }
   }
 
   @override
@@ -241,7 +264,6 @@ class _StartLesson extends State<StartLesson> {
       );
     }
 
-    // Get the current question to display from the master list using the current display index
     final int questionIndexToShow = _currentQuizQuestionIndices[currentQuestionDisplayIndex];
     Map<String, dynamic> currentQuestion = _allLessonQuestions[questionIndexToShow];
 
